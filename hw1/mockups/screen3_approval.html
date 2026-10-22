@@ -1,0 +1,117 @@
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<div class="nav-item"><span>主机节点</span><span class="nav-badge">6</span></div>
+<div class="nav-item"><span>状态策略</span><span class="nav-badge">4</span></div>
+<div class="nav-item active"><span>故障与审批</span><span class="nav-badge danger">1</span></div>
+<div class="nav-item"><span>长期记忆库</span><span class="nav-badge">42</span></div>
+<div class="nav-item"><span>在线诊断对话</span></div>
+<div class="nav-item"><span>系统设置</span></div>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;align-items:center;gap:8px;">
+<span style="color:#64748b;">故障单 /</span>
+<strong style="font-size:13px;">#INC-2026-104 (vps-prod-edge-01)</strong>
+<span class="tag tag-amber">待人工审批 (Pending Approval)</span>
+</div>
+<div style="color:#64748b;font-size:11px;">触发：2026-10-22 14:18:05 · 诊断轮次：3 / 8</div>
+</header>
+<section class="content">
+<div class="panel">
+<div class="panel-header">
+<span>1. 根因定位与命中记忆</span>
+<span class="tag tag-purple">命中记忆 #MEM-019 (关键词: disk full, 502, json.log)</span>
+</div>
+<div class="panel-body" style="display:grid;grid-template-columns:1fr 1.3fr;gap:12px;">
+<div>
+<div style="color:#64748b;font-size:10.5px;margin-bottom:2px;">触发漂移项</div>
+<div><code>disk(/) = 94.2% (&gt;85%)</code>；<code>caddy-proxy = HTTP 502</code></div>
+</div>
+<div>
+<div style="color:#64748b;font-size:10.5px;margin-bottom:2px;">Agent 根因结论 (root_cause)</div>
+<div>容器 <code>8f3a91c</code> 未轮转日志占满 18.4GB，叠加 journald 6.2GB 导致根分区耗尽，后端无法创建锁文件。</div>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-header">
+<span>2. 只读诊断命令执行记录 (exec_readonly_shell)</span>
+<span class="tag tag-green">READ_ONLY · 已脱敏</span>
+</div>
+<table>
+<thead>
+<tr>
+<th style="width:42px;">轮次</th>
+<th style="width:250px;">执行命令</th>
+<th style="width:52px;">退出码</th>
+<th>脱敏后关键输出摘要</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>#1</td>
+<td><code>du -sh /var/lib/docker/containers/* | sort -rh | head -n 3</code></td>
+<td><code>0</code></td>
+<td><code>18.4G /var/lib/docker/containers/8f3a91c4e2...</code></td>
+</tr>
+<tr>
+<td>#2</td>
+<td><code>journalctl --disk-usage</code></td>
+<td><code>0</code></td>
+<td><code>Archived and active journals take up 6.2G in the file system.</code></td>
+</tr>
+<tr>
+<td>#3</td>
+<td><code>docker logs --tail 20 app-backend</code></td>
+<td><code>0</code></td>
+<td><code>FATAL: could not write lock file: No space left on device (URI=[REDACTED_SECRET])</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="panel" style="border:2px solid #f59e0b;">
+<div class="panel-header" style="background:#fffbeb;">
+<span style="color:#92400e;">3. 待审批修复动作 (propose_remediation_plan)</span>
+<span class="tag tag-amber">MUTATING · 确认后执行</span>
+</div>
+<div class="panel-body">
+<table style="border:1px solid #e2e8f0;margin-bottom:10px;">
+<thead>
+<tr>
+<th style="width:28px;"><input type="checkbox" checked /></th>
+<th style="width:155px;">动作说明</th>
+<th>待执行 Shell 命令 (可在线修改参数)</th>
+<th style="width:64px;">风险</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><input type="checkbox" checked /></td>
+<td>清理 3 天前 systemd 日志</td>
+<td><input class="input" style="width:100%;font-family:Consolas,monospace;" type="text" value="sudo journalctl --vacuum-time=3d" /></td>
+<td><span class="tag tag-amber">medium</span></td>
+</tr>
+<tr>
+<td><input type="checkbox" checked /></td>
+<td>清空超限日志并重启容器</td>
+<td><input class="input" style="width:100%;font-family:Consolas,monospace;" type="text" value="sudo truncate -s 0 /var/lib/docker/containers/8f3a91c*/*-json.log &amp;&amp; docker restart app-backend" /></td>
+<td><span class="tag tag-amber">medium</span></td>
+</tr>
+</tbody>
+</table>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+<input class="input" style="flex:1;" type="text" placeholder="若驳回方案，请在此输入补充约束或修改意见（例如：保留 7 天日志）..." />
+<div style="display:flex;gap:6px;">
+<button class="btn btn-danger-ghost">驳回重规划</button>
+<button class="btn">标记已处理</button>
+<button class="btn btn-success">批准并执行 (2)</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>

@@ -1,0 +1,211 @@
+<style>
+.app-shell .panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.app-shell .panel-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 11.5px;
+}
+.app-shell .panel-body { padding: 10px 12px; }
+.app-shell .form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 90px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.app-shell .field-label {
+  display: block;
+  font-size: 10.5px;
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+.app-shell .textarea {
+  width: 100%;
+  height: 50px;
+  padding: 5px 8px;
+  line-height: 1.4;
+}
+.app-shell .seg-tabs {
+  display: inline-flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 10.5px;
+}
+.app-shell .seg-tab {
+  padding: 2px 8px;
+  background: #ffffff;
+  color: #475569;
+}
+.app-shell .seg-tab.active {
+  background: #0f172a;
+  color: #ffffff;
+}
+.app-shell .code-preview {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.4;
+  margin-top: 6px;
+}
+</style>
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<div class="nav-item"><span>主机节点</span><span class="nav-badge">6</span></div>
+<div class="nav-item active"><span>状态策略</span><span class="nav-badge">4</span></div>
+<div class="nav-item"><span>故障与审批</span><span class="nav-badge danger">1</span></div>
+<div class="nav-item"><span>长期记忆库</span><span class="nav-badge">42</span></div>
+<div class="nav-item"><span>在线诊断对话</span></div>
+<div class="nav-item"><span>系统设置</span></div>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;align-items:center;gap:8px;">
+<span style="color:#64748b;">状态策略 /</span>
+<strong style="font-size:13px;">edge-gateway.yaml</strong>
+<span class="tag tag-green">Active</span>
+</div>
+<div style="display:flex;gap:6px;">
+<button class="btn">探测测试 (Dry-Run)</button>
+<button class="btn btn-primary">保存策略</button>
+</div>
+</header>
+<section class="content" style="display:grid;grid-template-columns:1.3fr 1fr;gap:10px;align-items:start;">
+<div class="panel">
+<div class="panel-header">
+<span>策略规则编辑</span>
+<div class="seg-tabs">
+<span class="seg-tab active">表单模式</span>
+<span class="seg-tab">YAML 源码</span>
+</div>
+</div>
+<div class="panel-body">
+<div class="form-grid">
+<div>
+<label class="field-label">策略标识名</label>
+<input class="input" style="width:100%;" type="text" value="edge-gateway.yaml" />
+</div>
+<div>
+<label class="field-label">绑定目标主机</label>
+<select class="select" style="width:100%;">
+<option selected>vps-prod-edge-01</option>
+</select>
+</div>
+<div>
+<label class="field-label">巡检周期</label>
+<select class="select" style="width:100%;">
+<option selected>60 秒</option>
+</select>
+</div>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+<label class="field-label" style="margin:0;">期望状态断言列表 (4 项)</label>
+<button class="btn btn-sm">+ 添加断言</button>
+</div>
+<table style="border:1px solid #e2e8f0;margin-bottom:10px;">
+<thead>
+<tr>
+<th style="width:76px;">类型</th>
+<th style="width:105px;">监控目标</th>
+<th>期望状态条件</th>
+<th style="width:44px;text-align:right;">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>磁盘</td>
+<td><code>/</code></td>
+<td><code>usage &lt;= 85%</code></td>
+<td style="text-align:right;"><button class="btn btn-sm">删</button></td>
+</tr>
+<tr>
+<td>容器</td>
+<td><code>caddy-proxy</code></td>
+<td><code>running &amp;&amp; :443/healthz == 200</code></td>
+<td style="text-align:right;"><button class="btn btn-sm">删</button></td>
+</tr>
+<tr>
+<td>容器</td>
+<td><code>app-backend</code></td>
+<td><code>running &amp;&amp; restart_count == 0</code></td>
+<td style="text-align:right;"><button class="btn btn-sm">删</button></td>
+</tr>
+<tr>
+<td>证书</td>
+<td><code>main.crt</code></td>
+<td><code>days_remaining &gt; 14</code></td>
+<td style="text-align:right;"><button class="btn btn-sm">删</button></td>
+</tr>
+</tbody>
+</table>
+<div>
+<label class="field-label">运维意图备注 (Prompt Hint)</label>
+<textarea class="textarea">若根分区使用率超过 85%，优先检查 /var/lib/docker/containers 下未轮转的 *-json.log 及 journald 日志体积；禁止清理数据库目录。</textarea>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-header">
+<span>实时探测结果 (vps-prod-edge-01)</span>
+<span style="font-size:11px;color:#dc2626;font-weight:600;">2 项偏离</span>
+</div>
+<div class="panel-body">
+<table style="border:1px solid #e2e8f0;margin-bottom:10px;">
+<thead>
+<tr>
+<th>断言项</th>
+<th>期望</th>
+<th>实测值</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-alert">
+<td><strong>磁盘 /</strong></td>
+<td><code>&lt;=85%</code></td>
+<td><strong style="color:#dc2626;">94.2%</strong></td>
+<td><span class="tag tag-red">偏离</span></td>
+</tr>
+<tr class="row-alert">
+<td><strong>caddy-proxy</strong></td>
+<td><code>200</code></td>
+<td><strong style="color:#dc2626;">HTTP 502</strong></td>
+<td><span class="tag tag-red">偏离</span></td>
+</tr>
+<tr>
+<td><strong>app-backend</strong></td>
+<td><code>running</code></td>
+<td><code>running</code></td>
+<td><span class="tag tag-green">正常</span></td>
+</tr>
+<tr>
+<td><strong>main.crt</strong></td>
+<td><code>&gt;14d</code></td>
+<td><code>61d</code></td>
+<td><span class="tag tag-green">正常</span></td>
+</tr>
+</tbody>
+</table>
+<label class="field-label">YAML 预览</label>
+<div class="code-preview">node: vps-prod-edge-01<br/>interval: 60s<br/>assertions:<br/>  - type: disk, mount: "/", max_usage: 85%<br/>  - type: container, name: caddy-proxy, code: 200</div>
+</div>
+</div>
+</section>
+</main>
+</div>

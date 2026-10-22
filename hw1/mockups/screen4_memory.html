@@ -1,0 +1,119 @@
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<div class="nav-item"><span>主机节点</span><span class="nav-badge">6</span></div>
+<div class="nav-item"><span>状态策略</span><span class="nav-badge">4</span></div>
+<div class="nav-item"><span>故障与审批</span><span class="nav-badge">0</span></div>
+<div class="nav-item active"><span>长期记忆库</span><span class="nav-badge">42</span></div>
+<div class="nav-item"><span>在线诊断对话</span></div>
+<div class="nav-item"><span>系统设置</span></div>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;gap:8px;align-items:center;">
+<strong style="font-size:13px;">自适应长期记忆库</strong>
+<input class="input" style="width:180px;" type="text" value="disk full 502" placeholder="输入症状关键词搜索..." />
+<select class="select" style="width:115px;">
+<option>状态：全部 (42)</option>
+</select>
+</div>
+<button class="btn btn-primary">+ 手动录入记忆</button>
+</header>
+<section class="content" style="display:grid;grid-template-columns:1.15fr 1fr;gap:10px;align-items:start;">
+<div class="panel">
+<div class="panel-header">
+<span>检索结果列表</span>
+<span style="color:#64748b;font-size:11px;">匹配 4 条记录</span>
+</div>
+<table>
+<thead>
+<tr>
+<th style="width:68px;">记忆 ID</th>
+<th>症状关键词 (symptom_keywords)</th>
+<th style="width:46px;">复用</th>
+<th style="width:68px;">最后验证</th>
+<th style="width:56px;">状态</th>
+</tr>
+</thead>
+<tbody>
+<tr style="background:#eff6ff;">
+<td><strong>#MEM-019</strong></td>
+<td>
+<div><strong>容器日志膨胀导致根分区满载与 502</strong></div>
+<div style="margin-top:2px;"><span class="tag">disk-full</span> <span class="tag">http-502</span> <span class="tag">json-log</span></div>
+</td>
+<td>4 次</td>
+<td>2m 前</td>
+<td><span class="tag tag-green">Active</span></td>
+</tr>
+<tr>
+<td><strong>#MEM-015</strong></td>
+<td>
+<div><strong>PostgreSQL 连接池耗尽引发后端 502</strong></div>
+<div style="margin-top:2px;"><span class="tag">postgres</span> <span class="tag">http-502</span></div>
+</td>
+<td>2 次</td>
+<td>14d 前</td>
+<td><span class="tag tag-green">Active</span></td>
+</tr>
+<tr>
+<td><strong>#MEM-011</strong></td>
+<td>
+<div><strong>Docker 构建缓存占满 /var/lib/docker</strong></div>
+<div style="margin-top:2px;"><span class="tag">docker</span> <span class="tag">disk-full</span></div>
+</td>
+<td>6 次</td>
+<td>29d 前</td>
+<td><span class="tag tag-green">Active</span></td>
+</tr>
+<tr>
+<td><strong>#MEM-004</strong></td>
+<td>
+<div><strong>Certbot 续期时 80 端口冲突失败</strong></div>
+<div style="margin-top:2px;"><span class="tag">certbot</span> <span class="tag">port-80</span></div>
+</td>
+<td>1 次</td>
+<td>195d 前</td>
+<td><span class="tag tag-amber">待复核</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="panel">
+<div class="panel-header">
+<span>记忆详情编辑 · #MEM-019 (v2)</span>
+<span style="color:#64748b;font-size:10.5px;">来源: #INC-104</span>
+</div>
+<div class="panel-body" style="display:flex;flex-direction:column;gap:8px;">
+<div>
+<label class="field-label">症状关键词 (symptom_keywords)</label>
+<input class="input" style="width:100%;" type="text" value="root disk &gt; 85%, caddy 502, no space left on device, json.log" />
+</div>
+<div>
+<label class="field-label">适用范围标签 (scope_tags)</label>
+<input class="input" style="width:100%;" type="text" value="docker, systemd-journald, ubuntu-24.04" />
+</div>
+<div>
+<label class="field-label">根因分析总结 (root_cause)</label>
+<textarea class="textarea">容器未配置 log-opts max-size 导致 *-json.log 持续增长占满根分区，同时 /var/log/journal 未限制体积，引发后端无法创建锁文件。</textarea>
+</div>
+<div>
+<label class="field-label">已验证修复步骤模板 (remediation_steps)</label>
+<textarea class="textarea" style="font-family:Consolas,monospace;font-size:10.5px;height:56px;">1. sudo journalctl --vacuum-time=3d
+2. sudo truncate -s 0 /var/lib/docker/containers/&lt;id&gt;/*-json.log
+3. docker restart &lt;service_name&gt;</textarea>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px solid #f1f5f9;">
+<span style="color:#64748b;font-size:10.5px;">前序: #MEM-012 (Superseded)</span>
+<div style="display:flex;gap:6px;">
+<button class="btn btn-danger-ghost">归档删除</button>
+<button class="btn btn-primary">保存修改</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>

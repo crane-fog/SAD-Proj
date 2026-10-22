@@ -1,0 +1,413 @@
+<style>
+.app-shell, .app-shell * { box-sizing: border-box; }
+.app-shell {
+  display: flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f5f9;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  font-size: 11.5px;
+  line-height: 1.4;
+  margin: 12px 0 20px 0;
+  page-break-inside: avoid;
+}
+.app-shell .sidebar {
+  width: 145px;
+  background: #0f172a;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.app-shell .brand {
+  height: 42px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+}
+.app-shell .nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.app-shell .nav-item {
+  padding: 6px 9px;
+  border-radius: 5px;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.app-shell .nav-item.active {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.app-shell .nav-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+.app-shell .nav-badge.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+.app-shell .sidebar-footer {
+  padding: 8px 12px;
+  border-top: 1px solid #1e293b;
+  font-size: 10.5px;
+  color: #64748b;
+}
+.app-shell .main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-shell .topbar {
+  height: 42px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.app-shell .page-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.app-shell .content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.app-shell .stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.app-shell .stat-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.app-shell .stat-label {
+  color: #64748b;
+  font-size: 10.5px;
+}
+.app-shell .stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.app-shell .toolbar {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.app-shell .filter-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.app-shell .input, .app-shell .select, .app-shell .textarea {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 11px;
+  color: #0f172a;
+  font-family: inherit;
+}
+.app-shell .tab-group {
+  display: inline-flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.app-shell .tab {
+  padding: 3px 8px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 11px;
+  border-right: 1px solid #cbd5e1;
+}
+.app-shell .tab:last-child { border-right: none; }
+.app-shell .tab.active {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+}
+.app-shell .btn {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+}
+.app-shell .btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.app-shell .btn-success {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
+}
+.app-shell .btn-danger-ghost {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.app-shell .btn-sm {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+.app-shell .table-wrap {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+}
+.app-shell table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+.app-shell th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+}
+.app-shell td {
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  font-size: 11px;
+}
+.app-shell tr.row-alert { background: #fffbeb; }
+.app-shell .status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.app-shell .dot-green { background: #16a34a; }
+.app-shell .dot-red { background: #dc2626; }
+.app-shell .tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+.app-shell .tag-red { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.app-shell .tag-green { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.app-shell .tag-amber { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.app-shell .tag-purple { background: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
+.app-shell .meter {
+  display: inline-block;
+  width: 34px;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.app-shell .meter-fill { height: 100%; background: #3b82f6; }
+.app-shell .meter-fill.high { background: #dc2626; }
+.app-shell .table-footer {
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #64748b;
+  font-size: 10.5px;
+  background: #fafafa;
+}
+</style>
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<div class="nav-item active"><span>主机节点</span><span class="nav-badge">6</span></div>
+<div class="nav-item"><span>状态策略</span><span class="nav-badge">4</span></div>
+<div class="nav-item"><span>故障与审批</span><span class="nav-badge danger">1</span></div>
+<div class="nav-item"><span>长期记忆库</span><span class="nav-badge">42</span></div>
+<div class="nav-item"><span>在线诊断对话</span></div>
+<div class="nav-item"><span>系统设置</span></div>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div class="page-title">主机节点管理</div>
+<div style="display:flex;gap:6px;">
+<button class="btn">立即全量巡检</button>
+<button class="btn btn-primary">+ 添加主机节点</button>
+</div>
+</header>
+<section class="content">
+<div class="stats-row">
+<div class="stat-card">
+<div class="stat-label">在线节点 / 总数</div>
+<div class="stat-val">6 / 6</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">状态偏离节点</div>
+<div class="stat-val" style="color:#dc2626;">1</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">待审批修复单</div>
+<div class="stat-val" style="color:#d97706;">1</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">24h 自动巡检次数</div>
+<div class="stat-val">1,440</div>
+</div>
+</div>
+<div>
+<div class="toolbar">
+<div class="filter-group">
+<div class="tab-group">
+<span class="tab active">全部 (6)</span>
+<span class="tab">偏离告警 (1)</span>
+<span class="tab">正常 (5)</span>
+</div>
+<input class="input" style="width:150px;" type="text" placeholder="搜索主机名或 IP..." />
+<select class="select">
+<option>角色标签：全部</option>
+</select>
+</div>
+<span style="color:#64748b;font-size:10.5px;">上次巡检：12s 前</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>主机名 / 系统</th>
+<th>SSH 地址</th>
+<th>绑定策略</th>
+<th>状态检查</th>
+<th>CPU</th>
+<th>内存</th>
+<th>根磁盘</th>
+<th style="text-align:right;">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-alert">
+<td><strong>vps-prod-edge-01</strong><br/><span style="color:#64748b;font-size:10px;">Ubuntu 24.04</span></td>
+<td><code>root@47.96.112.84:22</code></td>
+<td><span class="tag">edge-gateway.yaml</span></td>
+<td><span class="tag tag-red"><span class="status-dot dot-red"></span>2 项偏离</span></td>
+<td><div class="meter"><div class="meter-fill" style="width:34%;"></div></div>34%</td>
+<td><div class="meter"><div class="meter-fill" style="width:78%;"></div></div>78%</td>
+<td><div class="meter"><div class="meter-fill high" style="width:94%;"></div></div><strong style="color:#dc2626;">94.2%</strong></td>
+<td style="text-align:right;">
+<button class="btn btn-sm btn-danger-ghost">审批修复</button>
+<button class="btn btn-sm">策略</button>
+</td>
+</tr>
+<tr>
+<td><strong>vps-app-core-02</strong><br/><span style="color:#64748b;font-size:10px;">Ubuntu 24.04</span></td>
+<td><code>ubuntu@47.96.115.20:22</code></td>
+<td><span class="tag">app-service.yaml</span></td>
+<td><span class="tag tag-green"><span class="status-dot dot-green"></span>6/6 通过</span></td>
+<td><div class="meter"><div class="meter-fill" style="width:28%;"></div></div>28%</td>
+<td><div class="meter"><div class="meter-fill" style="width:61%;"></div></div>61%</td>
+<td><div class="meter"><div class="meter-fill" style="width:45%;"></div></div>45.0%</td>
+<td style="text-align:right;">
+<button class="btn btn-sm">巡检</button>
+<button class="btn btn-sm">策略</button>
+<button class="btn btn-sm">编辑</button>
+</td>
+</tr>
+<tr>
+<td><strong>homelab-nas-01</strong><br/><span style="color:#64748b;font-size:10px;">Debian 12</span></td>
+<td><code>admin@10.0.10.12:22</code></td>
+<td><span class="tag">storage-zfs.yaml</span></td>
+<td><span class="tag tag-green"><span class="status-dot dot-green"></span>8/8 通过</span></td>
+<td><div class="meter"><div class="meter-fill" style="width:12%;"></div></div>12%</td>
+<td><div class="meter"><div class="meter-fill" style="width:41%;"></div></div>41%</td>
+<td><div class="meter"><div class="meter-fill" style="width:62%;"></div></div>62.1%</td>
+<td style="text-align:right;">
+<button class="btn btn-sm">巡检</button>
+<button class="btn btn-sm">策略</button>
+<button class="btn btn-sm">编辑</button>
+</td>
+</tr>
+<tr>
+<td><strong>homelab-pve-router</strong><br/><span style="color:#64748b;font-size:10px;">Debian 12</span></td>
+<td><code>root@10.0.10.1:2222</code></td>
+<td><span class="tag">wireguard-mesh.yaml</span></td>
+<td><span class="tag tag-green"><span class="status-dot dot-green"></span>4/4 通过</span></td>
+<td><div class="meter"><div class="meter-fill" style="width:9%;"></div></div>9%</td>
+<td><div class="meter"><div class="meter-fill" style="width:24%;"></div></div>24%</td>
+<td><div class="meter"><div class="meter-fill" style="width:19%;"></div></div>19.4%</td>
+<td style="text-align:right;">
+<button class="btn btn-sm">巡检</button>
+<button class="btn btn-sm">策略</button>
+<button class="btn btn-sm">编辑</button>
+</td>
+</tr>
+<tr>
+<td><strong>gpu-lab-workstation-01</strong><br/><span style="color:#64748b;font-size:10px;">Ubuntu 22.04</span></td>
+<td><code>lab@10.0.20.45:22</code></td>
+<td><span class="tag">gpu-worker.yaml</span></td>
+<td><span class="tag tag-green"><span class="status-dot dot-green"></span>5/5 通过</span></td>
+<td><div class="meter"><div class="meter-fill" style="width:65%;"></div></div>65%</td>
+<td><div class="meter"><div class="meter-fill" style="width:54%;"></div></div>54%</td>
+<td><div class="meter"><div class="meter-fill" style="width:48%;"></div></div>48.3%</td>
+<td style="text-align:right;">
+<button class="btn btn-sm">巡检</button>
+<button class="btn btn-sm">策略</button>
+<button class="btn btn-sm">编辑</button>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="table-footer">
+<span>共 6 台主机节点 · SSH 连接池活跃会话: 6</span>
+<div><button class="btn btn-sm" disabled>上一页</button> <button class="btn btn-sm">下一页</button></div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
