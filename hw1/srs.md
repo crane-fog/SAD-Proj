@@ -585,12 +585,10 @@ This web page enables operators to search, filter, review, and curate historical
 
 ## 10. Team member contributions
 
-- 2450313 徐佳咏: , 25%
-- 2351428 徐之涵: , 25%
-- 2352626 马小云: , 25%
-- 2451405 刘宸瑞：, 25%
-
-Web UI and backend, LLM agent with memory management, state reconciliation engine, SysOps specific tasks
+- 2450313 徐佳咏: state reconciliation engine, 25%
+- 2351428 徐之涵: LLM agent with memory management, 25%
+- 2352626 马小云: Web UI and backend, 25%
+- 2451405 刘宸瑞: SysOps specific tasks, 25%
 
 ---
 
