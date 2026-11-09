@@ -5,16 +5,16 @@ puppeteer:
     format: "A4"
     printBackground: true
     margin:
-        top: 15mm
-        bottom: 15mm
-        left: 20mm
-        right: 20mm
+        top: 10mm
+        bottom: 10mm
+        left: 14mm
+        right: 14mm
 ---
 
 <style>
 .markdown-preview.markdown-preview {
     font-family: "Times New Roman", "宋体";
-    font-size: 22px;
+    font-size: 11pt;
 }
 .markdown-preview.markdown-preview svg,
 .markdown-preview.markdown-preview img {
@@ -528,7 +528,7 @@ Human --> Node : "Approve & Execute"
 ### 7.7 Latency and Cost
 
 - **Acceptable Response Time**: Periodic SSH state probes shall complete in < 2 seconds per node, and end-to-end multi-turn agent diagnosis shall complete within 120 seconds.
-- **Rough Cost per Use**: Routine monitoring incurs $0 LLM cost as probes run deterministically in Go. The LLM is invoked only upon state drift, costing less than $0.5 per incident on average.
+- **Rough Cost per Use**: Routine monitoring incurs \$0 LLM cost as probes run deterministically in Go. The LLM is invoked only upon state drift, costing less than \$0.5 per incident on average.
 
 ### 7.8 Autonomy
 
