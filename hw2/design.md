@@ -194,8 +194,8 @@ The dominant trade-off lies in the safety tier: the fail-closed policy will occa
 | :-- | :-- | :-- |
 | **R1 — LLM latency, outage, or hallucination** | High / Medium | Deterministic `UC-03` probes and alerts never depend on the LLM (`SRS 7.5`); the ReAct loop is bounded by `max_turns` (default 8); hallucinated commands are neutralized by the Command Review Agent; unresolved incidents degrade to `Escalated` with logs instead of blocking the scheduler. |
 | **R2 — SSH execution timeout or midway failure** | Medium / High | Strict per-command timeouts and exponential backoff on unreachable nodes (`SRS 7.5`); pre-mutation `backup_cmd` verified before each step; fail-fast step execution plus paired `rollback_cmd` restore earlier steps via the one-click reverse rollback (CHG-01, `ADR-03`). |
-| **R3 — Verbose logs exhaust the LLM context window** | High / Medium | `exec_readonly_shell` returns bounded slices (`journalctl -n 50`, `docker logs --tail 50`); the Redaction Middleware truncates and masks outputs before transmission; `search_memory` caps retrieved records (`count = 3`); the distillation step compresses transcripts before storage (`UC-07`). |
-| **R4 — Concurrent probes and duplicate LLM loops** | Medium / Medium | Per-node lease lock state machine coalesces identical drift signals and serializes distinct drifts into `QUEUED_ON_LOCK` (CHG-02, `ADR-01`); `REMEDIATING` locks suppress routine probe ticks, eliminating false drift alerts while services restart. |
+| **R3 — Verbose logs exhaust the LLM context window** | High / Medium | `exec_readonly_shell` returns bounded slices (`journalctl -n 50`, `docker logs --tail 50`); the Redaction Middleware masks credentials in outputs before transmission; `search_memory` caps retrieved records (`count = 3`); the distillation step compresses transcripts before storage (`UC-07`). |
+| **R4 — Concurrent probes and duplicate LLM loops** | Medium / Medium | Per-node lease lock state machine coalesces identical drift signals and serializes distinct drifts into `Queued_On_Lock` (CHG-02, `ADR-01`); `REMEDIATING` locks suppress routine probe ticks, eliminating false drift alerts while services restart. |
 | **R5 — Obfuscated commands bypass the safety review** | Medium / High | The `mvdan.cc/sh/v3` AST parser resolves pipelines, subshells, and redirections before classification, so `eval`/base64 tricks are expanded and fail closed as `MUTATING` or `DESTRUCTIVE` (`UC-09` 1a); the reviewer is a separate model call with no access to the diagnostic context, preventing prompt-injection laundering. |
 | **R6 — Backup or rollback failure during remediation** | Medium / High | Backups are verified (`exit_code == 0`) before the mutating command runs; per-step statuses and rollback results are streamed via SSE; if rollback itself fails, the incident escalates to manual intervention with the exact pre-mutation snapshot path attached; retention and rollback verification are scheduled for Part III PoC validation (`Section 6`). |
 
@@ -339,7 +339,7 @@ Key structural decisions:
 
 #### 3.4.1 Per-Node Lease Lock State Machine
 
-The `NodeLeaseLockCoordinator` enforces a single lock per target node with heartbeat-renewed TTLs (ADR-01). Lock acquisition failures route drift signals into coalescing or `QUEUED_ON_LOCK` rather than spawning duplicate loops:
+The `NodeLeaseLockCoordinator` enforces a single lock per target node with heartbeat-renewed TTLs (ADR-01). Lock acquisition failures route drift signals into coalescing or `Queued_On_Lock` rather than spawning duplicate loops:
 
 ```mermaid
 stateDiagram-v2
@@ -359,7 +359,7 @@ stateDiagram-v2
         Identical drift on a locked node
         coalesces into the active incident
         (coalesced_count++); distinct drift
-        enters QUEUED_ON_LOCK and re-probes
+        enters Queued_On_Lock and re-probes
         on lock release.
     end note
 ```
@@ -378,8 +378,8 @@ stateDiagram-v2
     Pending_Approval --> Remediating : plan approved (REMEDIATING lock)
     Remediating --> Resolved : re-probe converges (UC-03)
     Remediating --> Partially_Failed : step k fails (fail-fast, k+1..N skipped)
-    Partially_Failed --> Remediating : reverse rollback (k-1..1) completed
-    Partially_Failed --> Pending_Approval : operator re-plans
+    Partially_Failed --> Diagnosing : reverse rollback (k-1..1) completes -> follow-up diagnosis
+    Partially_Failed --> Pending_Approval : operator edits & re-submits plan
     Diagnosing --> Escalated : max_turns reached
     Escalated --> Resolved : operator resolves manually
     Open --> Queued_On_Lock : distinct drift while node locked
@@ -398,6 +398,7 @@ sequenceDiagram
     autonumber
     participant S as ProbeScheduler
     participant C as NodeLeaseLockCoordinator
+    participant AO as Agent & Memory Orchestrator
     participant E as TransactionalSSHExecutor
     participant N as Target Linux Node
     participant DB as SQLite
@@ -425,7 +426,7 @@ sequenceDiagram
             else drift detected
                 S->>DB: create incident = Open (+ drift alert)
                 S->>C: upgrade lease to DIAGNOSING
-                S-->>DB: dispatch UC-04 diagnostic loop
+                S-->>AO: drift event (DIAGNOSING) -> dispatch UC-04 loop
             end
         end
     end
@@ -445,6 +446,7 @@ sequenceDiagram
 
     API-->>O: SSE: incident = Pending_Approval (root cause + plan)
     O->>API: review plan (approve / edit / reject)
+    note over O, API: on reject the plan returns to UC-04 diagnosis - shown path is approval
     API->>C: acquire exclusive REMEDIATING lock
     C-->>API: lease granted (UC-03 probes suppressed)
     loop each RemediationAction k = 1..N
