@@ -174,7 +174,7 @@ flowchart LR
 
 - **Options:** (1) Use local SQLite FTS5 with BM25 text ranking and explicit version/status columns; (2) deploy PostgreSQL with pgvector for combined relational and embedding-based search; or (3) maintain a separate vector database such as Milvus with embedding generation and synchronization. The alternatives can improve semantic recall when users describe equivalent problems using different wording, but add operational dependencies, model/embedding costs, data synchronization, and backup complexity that conflict with the small-scale deployment target.
 
-- **Decision:** Select **SQLite WAL + FTS5** as the primary memory store. Index sanitized `symptom_keywords`, `root_cause`, `remediation_steps`, and `scope_tags` using an external-content `memories_fts` table synchronized with `memories`. Use parameterized queries, operational-token normalization, BM25 ranking, a scope filter, and `status = ACTIVE`, returning a bounded top-k set (default `search_memory.count = 3`). Apply the deterministic `UC-07` **three-branch evolution rule** only after verified resolution: **unmatched** incidents insert a new active record; **matched, unchanged** successful fixes increment `hit_count` and update `last_verified_at`; **matched, modified** fixes insert a successor version and mark the prior version `SUPERSEDED`. Preserve `source_incident_id`, version lineage, and incident-scoped idempotency receipts, and allow manual archiving without destroying audit history.
+- **Decision:** Select **SQLite WAL + FTS5** as the primary memory store. Index sanitized `symptom_keywords`, `root_cause`, `remediation_steps`, and `scope_tags` using an external-content `memories_fts` table synchronized with `memories`. Use parameterized queries, operational-token normalization, BM25 ranking, explicit host/service scope checks, and `status = ACTIVE`, returning a bounded top-k set (default `search_memory.count = 3`) within a fixed context-token budget. Retrieval returns historical evidence, not instructions. New one-off candidates require operator acceptance before becoming `ACTIVE`. Apply the deterministic `UC-07` **three-branch evolution rule** only after verified resolution: **unmatched** incidents create a staged candidate that becomes active only after the operator accepts it; **matched, unchanged** successful fixes increment `hit_count` and update `last_verified_at`; **matched, modified** fixes insert a successor version and mark the prior version `SUPERSEDED`. Persist selected memory IDs with incidents; preserve `source_incident_id`, verification timestamps, version lineage, and incident-scoped idempotency receipts; use a durable UC-07 job claimed by a worker after resolution, and allow explicit discard or archiving without destroying audit history.
 
 - **Consequences and Trade-offs:** The decision avoids a separate search service, supports reproducible and inexpensive retrieval of exact system-error tokens, and integrates memory updates with other SQLite operations in atomic transactions. It also gives operators clear provenance and predictable version behavior. In exchange, FTS5 cannot guarantee semantic matching across paraphrases or changing log vocabulary, may require normalization for punctuation-rich SysOps identifiers, and does not independently determine whether an older fix is still safe in a new host context. Search hits are **advisory evidence only**: command execution remains subject to `CHG-03` interception and `UC-05` approval. Part III should validate retrieval precision/recall and stale-memory behavior on a small fault-injection corpus before considering an optional semantic reranker.
 
@@ -208,7 +208,7 @@ flowchart TB
         Diagnostic <-->|"Prompts / tool-call responses"| LLM["OpenAI-Compatible LLM Adapter"]
         Diagnostic -->|"Agent tool calls"| Interceptor["Deterministic Go Tool Execution Interceptor"]
         Distill -->|"commit_memory_record()"| Interceptor
-        Interceptor -->|"search_memory() or authorized memory commit"| Memory["Memory Service"]
+        Interceptor -->|"Scoped search_memory() or verified memory commit"| Memory["Memory Service"]
     end
 
     Memory <--> DB[("SQLite + FTS5 Memory Store")]
@@ -219,27 +219,27 @@ flowchart TB
         Redactor["Local Secret Redaction Middleware"]
     end
 
-    Interceptor -->|"Request shell risk classification"| Reviewer
+    Interceptor -->|"Only credential-free, locally validated command"| Reviewer
     Reviewer -->|"READ_ONLY / MUTATING / DESTRUCTIVE"| Interceptor
-    Interceptor -->|"Approved READ_ONLY probe"| SSH
-    Interceptor -->|"MUTATING probe refused; or invalid call"| Reject["Reject and return guidance"]
+    Interceptor -->|"Allowlisted, scope-checked READ_ONLY + current lease"| SSH
+    Interceptor -->|"Invalid syntax, unsafe scope or inline secret"| Reject["Reject and return guidance"]
     Interceptor -->|"Validated non-destructive plan"| Gate["UC-05: Pending Approval"]
     Interceptor -->|"DESTRUCTIVE"| Block["Hard block and audit"]
     UI["Operator via Vue / Gin"] -->|"Approve, edit, or reject"| Gate
     Gate -->|"Approved and revalidated actions only"| SSH
     SSH <-->|"SSH"| Node["Target Linux Node"]
     SSH -->|"Raw command output"| Redactor
-    Redactor -->|"Sanitized observations"| Diagnostic
+    Redactor -->|"Sanitized, bounded, scope-checked observations"| Diagnostic
 ```
 
 **Tool contracts and execution boundaries**
 
 | Tool | Main inputs | Behavior and authority |
 | :--- | :--- | :--- |
-| `search_memory` | `keywords: string[]`, `count: int = 3` | Read-only FTS5 search over active, relevant memories; results provide prior verified fixes as evidence, not instructions to execute. |
-| `exec_readonly_shell` | `node_id`, `command` | The interceptor requests independent safety classification. Only confirmed `READ_ONLY` commands are dispatched to SSH; ambiguous, mutating, or destructive probes are not executed. |
-| `propose_remediation_plan` | `node_id`, `root_cause`, `actions[]` | Persists a proposed plan for `UC-05`; it does **not** execute commands. Each mutating action specifies a command, `backup_cmd`, and `rollback_cmd` for review and subsequent safe execution (`CHG-01`). Destructive actions are rejected. |
-| `commit_memory_record` | `symptom_keywords`, `root_cause`, `remediation_steps`, `scope_tags`, optional `matched_memory_id`, `is_modified` | Allowed only after the incident has reached verified `Resolved`; commits sanitized knowledge through the Memory Service using the three-branch update rule (`UC-07`). |
+| `search_memory` | `keywords: string[]`, `scope_context: {node_id, os_family, os_version?, service_name, service_version?}`, `count: int = 3` | Uses scoped, parameterized FTS5 search on `ACTIVE` memory versions; an incompatible OS/service scope is excluded even when keywords match. Results are historical evidence, never executable instructions; cap record text and the *aggregate* prompt budget. |
+| `exec_readonly_shell` | `incident_id`, `node_id`, `command`, `scope_context` | The interceptor first parses the complete command AST, checks a narrow allowlist of diagnostic templates **and argument/path restrictions**, rejects inline secrets locally, then obtains a review verdict only for a safe-to-disclose command. A `READ_ONLY` verdict alone is insufficient: re-check current node lease generation and data-access scope immediately before SSH dispatch, cap output, and apply outbound content policy after local redaction. |
+| `propose_remediation_plan` | `incident_id`, `node_id`, `root_cause`, `actions[]` with `command`, `backup_cmd`, `rollback_cmd` | Persists an immutable proposal for `UC-05`, never executes it. All three commands per step are locally checked for secrets and reviewed before approval/execution; `DESTRUCTIVE` and unknown commands are rejected. The SSH subsystem rechecks approval, plan revision and lease before dispatch. |
+| `commit_memory_record` | `incident_id: string`, `symptom_keywords`, `root_cause`, `remediation_steps`, `scope_tags`, `matched_memory_id?: string`, `is_modified: bool` **required** | Internal UC-07 service tool (not an arbitrary LLM SQL write). Verifies `incident_id` is resolved and owns an idempotency receipt; derives/validates an `ACTIVE` matched memory and explicit `is_modified` from the *verified* fix before an atomic three-branch update. For unmatched one-off incidents the candidate may be discarded instead of promoted. The required flag refines the optional field in the Part I tool sketch. |
 
 #### 2.7.3 Short-Term Context and Long-Term Memory Retrieval
 
@@ -247,17 +247,19 @@ For each incident, the orchestrator constructs a **short-term diagnostic context
 
 The orchestrator retains concise observations and tool outcomes rather than unbounded raw logs. SSH probes use bounded commands (for example, `journalctl -n 50` or `docker logs --tail 50`), and context can be summarized between turns while preserving key error signatures and causal evidence. The local Secret Redaction Middleware removes credentials, tokens, and private keys before diagnostic output is persisted in SQLite, sent to an external LLM endpoint, or streamed to the UI. The web console receives sanitized progress summaries, not private raw model reasoning. An OpenAI-compatible adapter permits local or cloud inference without changing the orchestration logic.
 
+**Scope, input trust, and size limits.** The Memory Service receives `scope_context` from the *trusted* node/manifest record, not from a model-generated tag; it first filters for compatible OS/service identity and active status, then ranks by BM25. `count = 3` is not a size budget: bound each stored field and each returned record, cap the combined injected memory text (proposed maximum: 4,000 tokens), and reserve a separate token budget for the manifest and live observations. Treat retrieved repairs and SSH logs as untrusted data susceptible to prompt injection; instruction-like text in these sources never changes the command allowlist or approval policy. Large or unsupported data is truncated, summarized locally, or withheld instead of being sent wholesale to the model.
+
 #### 2.7.4 Bounded ReAct Diagnosis (`UC-04`)
 
-When `UC-03` detects drift and the per-node coordinator grants a `DIAGNOSING` lease (`CHG-02`), the orchestrator first searches historical memories and builds the initial context. The Diagnostic Agent then follows a bounded **Reason–Act–Observe** loop: (1) infer a likely cause from available evidence; (2) issue a diagnostic tool call; (3) let the interceptor and safety subsystem vet and execute an eligible read-only probe; and (4) incorporate the redacted observation into the next inference step. The configured default ceiling is `max_turns = 8` (`SRS UC-04`). If a command is not read-only, the interceptor refuses it and instructs the agent to collect evidence through safe probes or defer the change to the remediation plan.
+When `UC-03` detects drift and the per-node coordinator grants a `DIAGNOSING` lease (`CHG-02`), the orchestrator first searches historical memories and builds the initial context. The Diagnostic Agent then follows a bounded **Reason–Act–Observe** loop: (1) infer a likely cause from available evidence; (2) issue a diagnostic tool call; (3) let the interceptor and safety subsystem vet and execute an eligible read-only probe; and (4) incorporate the redacted observation into the next inference step. The configured default ceiling is `max_turns = 8` (`SRS UC-04`). The orchestrator also applies cancellation to every LLM HTTP request (proposed 30-second per-call deadline) and a 120-second end-to-end diagnosis budget from `SRS 7.7`. On timeout, it cancels the in-flight request, stops renewing the diagnosis lease once it is safe to do so, records a sanitized timeout outcome, and escalates; a hung provider cannot indefinitely hold the node or cause an unbounded retry. If a command is not read-only, the interceptor refuses it and instructs the agent to collect evidence through safe probes or defer the change to the remediation plan.
 
 If sufficient evidence is obtained, the agent submits a structured root-cause summary and ordered remediation actions through `propose_remediation_plan`. The incident transitions to `PENDING_APPROVAL` and waits for explicit operator review (`UC-05`); the Diagnostic Agent never runs the proposed mutations itself. If the turn ceiling is reached or useful diagnosis cannot proceed, the incident is marked `Escalated` with the available sanitized evidence, rather than guessing or automatically repairing the host. If the LLM endpoint is unavailable, deterministic drift detection and alerting continue independently, while agent diagnosis is deferred or escalated (`SRS 7.5`).
 
 #### 2.7.5 Safety, Human Handoff, and Post-Resolution Memory
 
-The local interceptor provides the enforceable boundary between untrusted model output and privileged tools. Command parsing and review must fail closed on unsupported or obfuscated shell syntax; the Review Agent's result is input to a deterministic policy decision, not permission by itself. `DESTRUCTIVE` commands are hard-blocked and audited. `MUTATING` operations are prohibited during autonomous diagnosis and require a reviewed, versioned plan plus explicit human approval. After approval, the SysOps SSH & Safety subsystem performs the `backup_cmd`, then the change, and finally post-change verification; failures enter the compensating recovery path described in `CHG-01` and `ADR-03`. The approval and recovery details belong to `UC-05` and the SSH subsystem, rather than the Diagnostic Agent.
+The local interceptor provides the enforceable boundary between untrusted model output and privileged tools. A `READ_ONLY` classification constrains mutation risk but **does not authorize reading arbitrary files**: the trusted Go control plane permits only approved, parameter-bounded diagnostics (for example `df`, `free`, `systemctl status <approved-unit>`, `journalctl -u <approved-unit> -n 50 --no-pager` and `docker logs --tail 50 <approved-container>`). General file-reading, arbitrary path arguments, redirections, nested shells, `eval`, and unsupported pipelines fail closed. Both the requested data source and the sanitized output must remain within the node/service scope approved for that incident; redaction is defense in depth, not a substitute for access control. A deterministic local preflight rejects commands containing inline tokens/passwords/private keys before any shell, backup, or rollback command reaches a potentially remote Review Agent. Commands and logs with unrecognized sensitivity must not be sent to external LLM endpoints. Command parsing and review must fail closed on unsupported or obfuscated shell syntax; the Review Agent's result is input to a deterministic policy decision, not permission by itself. The interceptor checks ownership and the monotonically increasing `lease_generation` *again at the SSH dispatch boundary*; an expired or replaced generation cannot start a command. Node takeover stays blocked until any prior remote command has been positively stopped or recovered, rather than relying on TTL expiry alone. `DESTRUCTIVE` commands are hard-blocked and audited. `MUTATING` operations are prohibited during autonomous diagnosis and require a reviewed, versioned plan plus explicit human approval. After approval, the SysOps SSH & Safety subsystem performs the `backup_cmd`, then the change, and finally post-change verification; failures enter the compensating recovery path described in `CHG-01` and the SysOps SSH & Safety team design. The approval and recovery details belong to `UC-05` and the SSH subsystem, rather than the Diagnostic Agent.
 
-Only after the desired-state probe confirms recovery and the incident reaches `Resolved` does `UC-07` begin memory distillation. The system extracts the observed symptoms, confirmed root cause, verified remediation, and any operator modifications, scrubs sensitive content, and invokes `commit_memory_record`. Its three-branch policy inserts a new memory for an unmatched incident, increments `hit_count` and refreshes `last_verified_at` for an unchanged successful reuse, or inserts a new version and marks the old entry `Superseded` when the fix was modified. Operators may inspect and archive one-off memories (`UC-08`). This process separates temporary diagnostic context from reusable, provenance-linked long-term knowledge, while ensuring that unverified LLM suggestions are never treated as successful fixes.
+Only after the desired-state probe confirms recovery and the incident reaches `Resolved` does `UC-07` begin memory distillation. The system extracts the observed symptoms, confirmed root cause, verified remediation, and any operator modifications, scrubs sensitive content, and invokes `commit_memory_record`. Its three-branch policy stages an unmatched one-off candidate for approval before an active memory is created, increments `hit_count` and refreshes `last_verified_at` for an unchanged successful reuse, or inserts a new version and marks the old entry `Superseded` when the fix was modified. Operators first review unmatched one-off candidates in a non-indexed `PENDING_REVIEW` distillation state: accepting promotes the candidate to `ACTIVE`, while discarding records a `DISCARDED` receipt without making the memory searchable. After promotion, operators may also edit or archive memories (`UC-08`). Selected `matched_memory_id` and environmental scope are persisted with the incident before diagnosis completes. The server compares the canonical verified remediation against the current active matched record (including operator modifications); a mere FTS similarity hit is not automatically considered the same pattern. All new or successor verified records set `last_verified_at` to the incident's actual verification time; manual curation never fabricates verification. This process separates temporary diagnostic context from reusable, provenance-linked long-term knowledge, while ensuring that unverified LLM suggestions are never treated as successful fixes.
 
 **Design consistency:** This section implements the `UC-04`, `UC-07`, and `UC-09` behaviors in Part I SRS; the `CHG-01` transactional plan, `CHG-02` node lease coordination, and `CHG-03` deterministic interceptor refinements in Part II; and the REST/SSE and versioned memory interfaces proposed in the team's HW2 API design.
 
@@ -279,7 +281,7 @@ Database columns store **durable domain facts**, whereas the API presents versio
 
 #### 3.2.2 Entity–Relationship Diagram
 
-The following logical ER diagram shows primary and foreign keys (`PK`, `FK`). SQLite uses `TEXT` for opaque IDs and UTC timestamps, `INTEGER` for versions/counters, and JSON-valid `TEXT` for compact structured fields. Abbreviated attributes are expanded in the schema summary and the accompanying SQL appendix.
+The following logical ER diagram shows primary and foreign keys (`PK`, `FK`). SQLite uses `TEXT` for opaque IDs and UTC timestamps, `INTEGER` for versions/counters, and JSON-valid `TEXT` for compact structured fields. Abbreviated attributes are expanded in the schema summary below; the separate executable SQL sketch is intentionally not part of this document.
 
 ```mermaid
 erDiagram
@@ -386,7 +388,7 @@ erDiagram
     }
 ```
 
-`MEMORIES.supersedes_id` points to an earlier version within the same lineage; a newly revised entry is the active successor of the old one. `INCIDENTS.matched_memory_id` records the principal historical memory selected for a resolved incident; an optional incident–memory match table can record additional retrieved candidates if full retrieval provenance is required. `EVENTS`, `IDEMPOTENCY`, and `MEMORY_DISTILLATIONS` are infrastructure/audit tables explained below and intentionally omitted from the main domain diagram for readability.
+`MEMORIES.supersedes_id` points to an earlier version within the same lineage; a newly revised entry is the active successor of the old one. `INCIDENTS.matched_memory_id` records the principal verified, scoped historical memory selected **during diagnosis, before resolution**, so restart/retry does not lose the relationship. Persist it in the same transaction as the relevant diagnostic observation (or an incident–memory selection record), including the matched memory version and scope used for selection. An optional incident–memory match table can record the remaining retrieved candidates for provenance. A high BM25 score by itself never establishes an actual match. `EVENTS`, `IDEMPOTENCY`, and `MEMORY_DISTILLATIONS` are infrastructure/audit tables explained below and intentionally omitted from the main domain diagram for readability. The distillation table also acts as a **durable work queue**: the incident-resolution transaction inserts a `PENDING` work record atomically with `RESOLVED`, making a post-crash retry possible. A `PENDING_REVIEW` work state stores unmatched one-off candidates outside the searchable `memories` table.
 
 #### 3.2.3 Core Tables, Keys, and Indexes
 
@@ -395,41 +397,41 @@ erDiagram
 | `nodes` | `id` PK; `name`, `host`, `port`, `username`, `host_key_fingerprint`, `connection_status`, `health_status`, `last_probe_at`, `version`; encrypted credential blob never returned by API | Registered Linux nodes (`UC-01/03`). `connection_status` is not conflated with health or lock state. |
 | `node_leases` | `node_id` PK/FK; `lock_state`, `owner_token`, monotonic `lease_generation`, `lease_expires_at`, `recovery_required` | SQLite-backed per-node coordinator (`CHG-02`); exclusive ownership and safety on uncertain remote execution. |
 | `manifests` + `manifest_revisions` | `manifests.node_id` FK; active revision pointer; immutable `(manifest_id, revision_number)` unique key; YAML and validation state in revisions | Versioned declarative policies. A running incident stays bound to the revision observed when drift occurred, even when a policy is edited later. |
-| `incidents` | `id` PK; `node_id`, `manifest_revision_id` FKs; `status`, `drift_signature`, `drift_summary`, `coalesced_count`, `root_cause_summary`, `matched_memory_id`, `plan_revision`, `version`, `resolved_at` | Traces a fault from `OPEN`/`DIAGNOSING` to `PENDING_APPROVAL`, `RESOLVED`, or `ESCALATED`, including `QUEUED_ON_LOCK` and `PARTIALLY_FAILED`. |
+| `incidents` | `id` PK; `node_id`, `manifest_revision_id` FKs; `status`, `drift_signature`, `drift_summary`, `coalesced_count`, `root_cause_summary`, `matched_memory_id`, `matched_memory_version`, `plan_revision`, `version`, `resolved_at` | Traces a fault from `OPEN`/`DIAGNOSING` to `PENDING_APPROVAL`, `RESOLVED`, or `ESCALATED`, including `QUEUED_ON_LOCK` and `PARTIALLY_FAILED`. |
 | `diagnostic_observations` | `id` PK; `incident_id` FK; `turn_index`, `tool_name`, `review_verdict`, sanitized command/observation, `created_at` | Bounded, redacted evidence for the ReAct trace; no raw secrets or private model reasoning are stored (`UC-04/09`). |
-| `remediation_plans` + `remediation_actions` | `(incident_id, revision_number)` unique; ordered `(plan_id, step_index)` unique; each action has `command`, mandatory `backup_cmd` and `rollback_cmd`, risk and review metadata | Immutable reviewed plan revisions. A plan edit creates a new revision; previously approved steps cannot silently change (`CHG-01`, `ADR-03`). |
+| `remediation_plans` + `remediation_actions` | `(incident_id, revision_number)` unique; ordered `(plan_id, step_index)` unique; each action has `command`, mandatory `backup_cmd` and `rollback_cmd`, risk and review metadata | Immutable reviewed plan revisions. A plan edit creates a new revision; previously approved steps cannot silently change (`CHG-01` and the team's SSH & Safety design). |
 | `operations` + `action_runs` | `operations` records operation/worker/lease generation; `action_runs` records backup, command and compensation states for a specific approved action | Tracks execution and recovery outcomes without mutating the reviewed command definitions. Timeout/uncertain status is explicit. |
 | `memories` | `id` PK; `lineage_id`, `revision_number`, `supersedes_id` FK; `source_incident_id` FK; `symptom_keywords`, `root_cause`, `remediation_steps`, `scope_tags`, `status`, `hit_count`, `last_verified_at`, `version` | Reusable, verified, redacted knowledge with provenance, optimistic concurrency, and audit-preserving version lineage (`UC-07/08`). |
-| `events` | Autoincrement `id`; `resource_type`, `resource_id`, `resource_version`, `type`, sanitized JSON `payload`, `committed_at` | Durable transactional event/outbox for ordered SSE updates and reconnect replay (`ADR-04`). |
-| `idempotency` + `memory_distillations` | `(operator_id, key)` unique for operator commands; `memory_distillations.incident_id` unique for all UC-07 branches | Prevents duplicate operations or duplicate post-resolution memory commits. |
+| `events` | Autoincrement `id`; `resource_type`, `resource_id`, `resource_version`, `type`, sanitized JSON `payload`, `committed_at` | Durable SSE outbox. Keep up to **24 hours or 100,000 entries**, whichever threshold is reached first; reclaim old rows in short background batches. Expired replay cursors cause `stream.reset` and a fresh consistent `/sync` snapshot (per the proposed Web/API contract). |
+| `idempotency` + `memory_distillations` | `(operator_id, key)` unique for operator commands; `memory_distillations.incident_id` unique, plus `state` (`PENDING`, `RUNNING`, `PENDING_REVIEW`, `COMPLETED`, `DISCARDED`, `FAILED`), `candidate_json`, `memory_id`, `claimed_at`, `retry_count` | Durable UC-07 work/receipt; resolution plus `PENDING` work is committed together, while one-off candidates wait for operator decision outside the active memory index. |
 
 Indexes target the most common operations: `incidents(node_id, status, updated_at)`, `remediation_plans(incident_id, revision_number)`, `remediation_actions(plan_id, step_index)`, `memories(status, last_verified_at)`, and an FTS5 index on searchable memory text. A partial unique index on `memories(lineage_id) WHERE status = 'ACTIVE'` prevents two simultaneously active versions of one troubleshooting pattern; `UNIQUE(supersedes_id)` prevents a previous version from acquiring two immediate successors. Foreign keys are enabled on every SQLite connection; WAL supports concurrent readers while short transactions serialize writes.
 
 #### 3.2.4 SQLite FTS5 Search and Context Retrieval
 
-The `memories_fts` virtual table indexes four searchable fields in `memories`: `symptom_keywords`, `root_cause`, `remediation_steps`, and `scope_tags`. An **external-content** FTS5 index keyed by the `memories` rowid and synchronized through insert/update/delete triggers avoids a second independent source of truth. The Memory Service normalizes diagnostic terms, constructs a safely escaped FTS query, and uses bound parameters to prevent user-provided text from being interpreted as arbitrary SQL or untrusted FTS query syntax. It joins ranked FTS matches back to `memories`, filters `status = 'ACTIVE'` and applicable scope, and uses `bm25(...)` ranking with a configurable top-`k` limit (default `search_memory.count = 3` in Part I SRS).
+The `memories_fts` virtual table indexes four searchable fields in `memories`: `symptom_keywords`, `root_cause`, `remediation_steps`, and `scope_tags`. An **external-content** FTS5 index keyed by the `memories` rowid and synchronized through insert/update/delete triggers avoids a second independent source of truth. The Memory Service normalizes diagnostic terms, constructs a safely escaped FTS query, and uses bound parameters to prevent user-provided text from being interpreted as arbitrary SQL or untrusted FTS query syntax. `scope_context` is obtained from trusted current node/manifest metadata (`node_id`, OS distribution/version, service identity/version); incompatible records are excluded before any result is injected into the LLM. Each memory field has an enforced storage length limit; retrieved content is truncated/summarized to a total memory budget (proposed 4,000 tokens), not merely bounded by record count. It joins ranked FTS matches back to `memories`, filters `status = 'ACTIVE'` and applicable scope, and uses `bm25(...)` ranking with a configurable top-`k` limit (default `search_memory.count = 3` in Part I SRS).
 
 For example, a future incident involving `nginx.service` and an address-in-use error can recover a prior verified memory containing those tokens; it does **not** automatically execute its stored remediation steps. Keyword retrieval is lightweight and particularly useful for exact SysOps identifiers, but it can miss semantically similar incidents with different wording. This limitation is a known trade-off of `ADR-02`, not a claim of semantic-equivalent search. `Superseded` and `Archived` records remain available for audit but are excluded from normal retrieval.
 
 #### 3.2.5 Adaptive Memory Evolution (`UC-07`)
 
-A memory write is authorized only after an incident has been **verified `RESOLVED`** (post-remediation desired-state check or verified manual resolution). The distillation pipeline receives the redacted symptom, confirmed cause, successful steps, scope tags, and a reference to any matched memory. The following cases are implemented in one SQLite transaction, with a corresponding `memory.updated` event inserted into the `events` outbox:
+A memory write is authorized only after an incident has been **verified `RESOLVED`** (post-remediation desired-state check or verified manual resolution). The distillation pipeline receives the redacted symptom, confirmed cause, successful steps, scope tags, and a reference to any matched memory. The three outcomes below are serialized in short SQLite transactions. A newly unmatched candidate is staged first, and promotion or discard occurs in a separate transaction after the operator chooses; each committed resource change writes its matching durable event atomically:
 
 | Verified outcome | Transactional update | Observable result |
 | :--- | :--- | :--- |
-| **New pattern** (`matched_memory_id IS NULL`) | Insert a new `memories` row: new lineage, `revision_number = 1`, `status = 'ACTIVE'`, `hit_count = 1`, `source_incident_id = resolved incident`; FTS5 trigger indexes its searchable fields. | New searchable memory with incident provenance. |
-| **Existing pattern, unchanged fix** (`is_modified = false`) | Claim an idempotent incident-scoped distillation receipt, then update the *active matched version*: `hit_count += 1`, `last_verified_at = verification time`, `version += 1`. | Existing knowledge gains another verified use without an unnecessary duplicate version. |
-| **Existing pattern, modified fix** (`is_modified = true`) | Mark the old row `SUPERSEDED`, insert the verified replacement in the same `lineage_id` with `revision_number + 1`, `supersedes_id = old.id`, `status = 'ACTIVE'` and new incident provenance. | Version history is preserved; only the new revision is used for future retrieval. |
+| **New pattern** (`matched_memory_id IS NULL`) | Distiller stores a sanitized candidate in `memory_distillations` with `state = PENDING_REVIEW`. Operator may `DISCARD` it as a one-off, leaving a non-indexed receipt; on acceptance insert `ACTIVE` memory with new lineage, `revision_number = 1`, `source_incident_id`, `hit_count = 1`, and **`last_verified_at = incidents.resolved_at`**. | Unaccepted/discarded candidates never appear in FTS5; accepted candidate is searchable with incident provenance. |
+| **Existing pattern, unchanged fix** (`is_modified = false`) | Verify the selected `matched_memory_id` is the current `ACTIVE` version with a compatible environment and verified matching remediation; atomically claim the incident receipt, then set `hit_count += 1`, `last_verified_at = incidents.resolved_at`, `version += 1`. | Existing verified knowledge gains another use without creating a new version. |
+| **Existing pattern, modified fix** (`is_modified = true`) | Validate the current active matched lineage and operator-edited/verified differences; mark old record `SUPERSEDED` and insert a new `ACTIVE` row with the same lineage, `supersedes_id = old.id`, `revision_number + 1`, new incident provenance and **`last_verified_at = incidents.resolved_at`**. | Version history remains auditable; only new version is searchable by default. |
 
-If the operator later edits a memory through `PATCH /memories/{id}`, the service follows the versioning path but **does not change `last_verified_at` merely because of the edit**. `POST /memories/{id}/archives` changes the current record to `ARCHIVED` rather than deleting evidence or incident links. All three branches record a unique `memory_distillations(incident_id)` receipt as part of the same transaction. A repeated or retried distillation event must not create a duplicate memory or increment `hit_count` twice; all branches maintain the one-active-version-per-lineage invariant. This is especially important when an internal distillation worker retries after an uncertain commit response.
+If the operator later edits a memory through `PATCH /memories/{id}`, the service follows the versioning path but **does not change `last_verified_at` merely because of the edit**. `POST /memories/{id}/archives` changes the current record to `ARCHIVED` rather than deleting evidence or incident links. All three branches use one unique `memory_distillations(incident_id)` work/receipt row, but pending review and the later operator decision are separate, crash-recoverable transactions. A repeated or retried distillation event must not create a duplicate memory or increment `hit_count` twice; all branches maintain the one-active-version-per-lineage invariant. **On resolution**, the control plane commits `RESOLVED`, `resolved_at` and a `PENDING` distillation job in a *single* SQLite transaction. The worker claims that job atomically; startup recovery reclaims interrupted jobs. It derives a tentative match from a persisted incident selection, validates its current scope/status/lineage, and compares a canonical normalized set of *verified* remediation steps with the selected memory. If the match is not genuinely the same fault pattern, it resets `matched_memory_id = NULL` and routes to a new candidate rather than superseding unrelated history. `is_modified` is **always supplied as an explicit boolean** after this deterministic validation; the Part I optional parameter is refined to required in the HW2 design. A `PENDING_REVIEW` candidate is decided by the operator before its first `ACTIVE` insertion. The operator acceptance/discard interaction is shown as a **conceptual UC-07 workflow only**: no additional public REST endpoint or API request/response shape is specified in this section. The Web/API owner will decide how this interaction maps to the existing API contract. Until that decision is agreed, unmatched candidates remain non-indexed in `PENDING_REVIEW`; the design must not silently promote them to `ACTIVE`. Any eventual operator decision must be authenticated, version-checked, idempotent, and durable so worker retries cannot duplicate a memory entry.
 
 #### 3.2.6 Integrity, Safety, and API Alignment
 
 The schema implements `CHG-01` by storing pre-mutation backups, compensation commands and individual execution outcomes; `CHG-02` by storing per-node lease ownership/generation and incident coalescing counts; and `CHG-03` by recording **reviewed tool outcomes** without granting database or SSH privileges to the LLM. All persisted diagnostic text, memory content and event payloads must pass local secret redaction before commit. SSH credentials are encrypted at rest and are never represented in responses or SSE payloads.
 
-For `ADR-04`, resource changes and their corresponding outbox events are committed atomically; the REST/SSE gateway can replay events by increasing event `id` after reconnection. The UI's `GET /memories`, `GET /memories/{id}`, `PATCH /memories/{id}` and archive action map to `memories` and `memories_fts`, while node and incident DTO versions map to their corresponding `version` fields. A plan approval is bound to the current incident/plan revision and an idempotency key. This design keeps the Agent & Memory subsystem's persistence consistent with the separate SysOps SSH & Safety and Web/API designs without treating model output as an authoritative database mutation.
+For the proposed team REST/SSE design, resource changes and their corresponding outbox events are committed atomically; the REST/SSE gateway can replay events by increasing event `id` after reconnection. Events are retained for up to 24 hours or 100,000 rows; a replay request older than retained history receives `stream.reset` and must fetch a fresh `/sync` snapshot. The UI's `GET /memories`, `GET /memories/{id}`, `PATCH /memories/{id}` and archive action map to `memories` and `memories_fts`, while node and incident DTO versions map to their corresponding `version` fields. A plan approval is bound to the current incident/plan revision and an idempotency key. This design keeps the Agent & Memory subsystem's persistence consistent with the separate SysOps SSH & Safety and Web/API designs without treating model output as an authoritative database mutation.
 
-**Implementation appendix:** The companion `SAD_HW2_XZH_3_2_schema.sql` is a proposed, executable SQLite schema illustrating these tables, FTS5 triggers and indexes. The ER diagram and discussion above constitute the required design artifact; the SQL file is provided for cross-checking and Part III implementation planning.
+**Implementation note:** The ER diagram and table/index definitions above are the proposed HW2 design artifact. A separate executable SQL schema may be developed for Part III, but no companion `.sql` file is included with this PR. For Part III the new work-queue and review-state columns must also be reflected in the executable migration and tested against SQLite foreign-key/FTS5 behavior.
 
 ### 3.3 Agent & Memory Diagrams
 
@@ -448,65 +450,78 @@ sequenceDiagram
     participant I as Go Tool Interceptor
     participant R as Command Review Agent
     participant E as SSH Executor
-    participant S as Secret Redaction Middleware
+    participant S as Local Redaction & Output Scope Guard
     participant UI as Gin API / Web UI
 
-    Note over C,O: UC-03 has detected drift; node lease enters DIAGNOSING
-    C->>O: Start diagnosis(incident_id, manifest, drift)
-    O->>M: search_memory(symptom_keywords, count = 3)
-    M->>DB: FTS5 lookup (ACTIVE records, scope, BM25)
-    DB-->>M: Ranked verified memories
-    M-->>O: Top matching memories (read-only evidence)
-    O->>O: Assemble bounded, sanitized context
+    Note over C,O: UC-03 detects drift, coordinator owns DIAGNOSING generation
+    C->>O: Start diagnosis(incident_id, manifest, drift, lease_generation)
+    O->>M: search_memory(keywords, trusted scope_context, count=3)
+    M->>DB: FTS5 ACTIVE + compatible OS/service scope + BM25
+    DB-->>M: Ranked verified memories within size budget
+    M-->>O: Up to 3 bounded advisory memories
+    O->>DB: Persist selected matched_memory_id and version
+    O->>O: Assemble bounded, sanitized context (logs are untrusted data)
 
-    loop ReAct turns while unresolved (max_turns = 8)
-        O->>D: Infer next step from context and observations
-        D-->>O: Tool call: exec_readonly_shell(node_id, command)
-        O->>I: Intercept tool call with incident and lease context
-        I->>I: Validate tool, command AST, policy, and lease
-        I->>R: Request safety classification (no execution)
-        R-->>I: READ_ONLY / MUTATING / DESTRUCTIVE verdict
-
-        alt Validated READ_ONLY
-            I->>E: Execute approved bounded diagnostic probe
-            E-->>S: Raw SSH output (local boundary only)
-            S-->>I: Redacted output, exit code, and timeout status
-            I-->>O: Sanitized observation / tool result
-            O->>DB: Persist sanitized diagnostic observation
-            O->>O: Append concise evidence to context
-        else MUTATING or ambiguous syntax
-            I-->>O: Reject diagnosis-time mutation (fail closed)
-            O->>O: Keep proposed change for human-reviewed plan
-        else DESTRUCTIVE
-            I-->>O: Hard block and produce auditable denial
-            O->>DB: Persist sanitized safety denial
+    loop ReAct turns up to 8 AND before 120s deadline
+        O->>D: Request next diagnosis step (per-call deadline)
+        alt LLM request timeout or overall deadline
+            O->>D: Cancel in-flight request
+            O->>DB: Record timeout and ESCALATED status
+            O->>C: Stop diagnosis lease renewal and start safe-release protocol
+        else LLM responds
+            D-->>O: Tool call exec_readonly_shell(incident_id,node_id,command,scope)
+            O->>I: Intercept tool call with current lease generation
+            I->>I: Parse AST, allowlist command/args/path, reject inline secrets
+            alt Unsupported scope, inline secret or unsafe syntax
+                I-->>O: Fail closed locally without transmitting to reviewer
+            else Locally admissible and safe to disclose
+                I->>R: Send credential-free command for risk classification
+                R-->>I: READ_ONLY / MUTATING / DESTRUCTIVE
+                alt READ_ONLY AND bounded data-access scope
+                    I->>C: Recheck current owner/generation before dispatch
+                    C-->>I: Current generation and no uncertain predecessor
+                    I->>E: Dispatch only if lease is still current
+                    E-->>S: Bounded SSH output (local only)
+                    S->>S: Redact and verify outbound data scope
+                    alt Safe bounded observation
+                        S-->>O: Sanitized observation and exit/timeout result
+                        O->>DB: Persist safe evidence and auditable tool outcome
+                    else Potential private data or oversized result
+                        S-->>O: Withhold payload and return a safe error summary
+                        O->>DB: Persist sanitized denial
+                    end
+                else MUTATING or ambiguous
+                    I-->>O: No autonomous execution and defer to human plan
+                else DESTRUCTIVE
+                    I-->>O: Hard block and audit denial
+                end
+            end
         end
     end
 
-    alt Root cause established within turn limit
-        D-->>O: propose_remediation_plan(root_cause, actions)
-        O->>I: Intercept and validate proposed plan
-        I->>I: Require command, backup_cmd, rollback_cmd per action
-        I->>R: Classify proposed commands and recovery commands
-        R-->>I: Safety verdicts for plan steps
-        alt Any DESTRUCTIVE / invalid action
-            I-->>O: Reject plan; require revision or escalation
-        else Plan is non-destructive and well-formed
-            I->>DB: Save versioned plan; set PENDING_APPROVAL
-            DB-->>UI: Committed plan event available for sanitized SSE
-            Note over UI,E: UC-05 approval is required; no mutation executes here
+    alt Sufficient evidence and within time/turn limits
+        D-->>O: propose_remediation_plan(incident_id,root_cause,actions)
+        O->>I: Submit immutable proposal
+        I->>I: Verify command/backup_cmd/rollback_cmd, reject inline secrets
+        I->>R: Classify locally validated credential-free commands
+        R-->>I: Safety verdicts (classifier only)
+        alt Any invalid or destructive step
+            I-->>O: Reject or escalate without execution
+        else Reviewed non-destructive plan
+            I->>DB: Save immutable plan revision and PENDING_APPROVAL
+            DB-->>UI: Sanitized committed event available to SSE
+            Note over UI,E: UC-05 human approval still required for mutation
         end
-    else Turn ceiling reached, LLM unavailable, or no safe progress
-        O->>DB: Mark incident ESCALATED; save sanitized evidence
-        DB-->>UI: Committed escalation event available for SSE
+    else Turn limit or safe progress exhausted
+        O->>DB: Save evidence and ESCALATED status without mutation
     end
 ```
 
-**Interaction rationale.** The State Reconciliation Engine performs deterministic drift detection and hands the incident to the Agent Orchestrator only when the per-node coordinator permits diagnosis (`CHG-02`). Before calling the LLM, the orchestrator performs local `search_memory` and includes up to three relevant, currently `ACTIVE` troubleshooting memories, alongside the YAML policy, drift symptom, and bounded diagnostic evidence. Previously successful fixes are **context**, not permission to run commands automatically.
+**Interaction rationale.** Before issuing model calls, the orchestrator performs scope-constrained FTS5 retrieval using trusted OS/service metadata and persists the chosen matched memory ID/version with the incident. Historical fixes and service logs are treated as *untrusted evidence*, not instructions. Per-record and total context budgets limit injected text; `max_turns = 8` and explicit LLM/request deadlines bound time, not merely completed turns.
 
-In each bounded ReAct turn, the Diagnostic Agent proposes a tool call, but the **Go Tool Execution Interceptor** owns the dispatch decision. It checks the requested tool, command syntax, current incident state, and lease context. For candidate shell calls, the independent Review Agent returns only a `READ_ONLY`, `MUTATING`, or `DESTRUCTIVE` classification. An approved read-only probe may reach the SSH executor; diagnostic-time mutations are refused, ambiguous commands fail closed, and destructive commands are hard-blocked and audited. Crucially, **there is no direct arrow from the Review Agent to SSH**. Every SSH output is redacted locally **before** it is returned to the LLM, persisted as a diagnostic observation, or exposed via the API/SSE stream (`UC-09`).
+The deterministic interceptor validates the *whole* shell command against a narrow diagnostic allowlist and its path/argument scope, rejects embedded credentials before sending anything to a potentially external Review Agent, and consults that reviewer only as a classifier. The reviewer does not execute commands. Even a `READ_ONLY` verdict cannot authorize arbitrary file reads; the SSH dispatcher checks the current node lease owner/generation immediately before dispatch. The previous lease owner must have no unknown remote execution before another generation takes over. SSH output is redacted and checked for allowed data scope *before* entering prompts, storage or SSE; sensitive or unbounded results are withheld.
 
-The normal loop stops when sufficient evidence supports a diagnosis, or at the configured ceiling (`max_turns = 8` by default). The agent then requests `propose_remediation_plan` with an ordered set of steps. Each mutating step includes the proposed `command`, `backup_cmd`, and `rollback_cmd` from `CHG-01`; the interceptor checks the plan for prohibited actions and persists an acceptable proposal as a **versioned, unexecuted** plan in `PENDING_APPROVAL`. The actual approval, pre-mutation backup, fail-fast execution, convergence verification, and rollback belong to `UC-05` and the SysOps SSH & Safety design (Sections 3.4–3.5 and `ADR-03`). If diagnosis stalls or the model is unavailable, the incident is escalated rather than attempting an unverified fix. All surfaced progress consists of sanitized summaries and tool results, not raw private model reasoning (`ADR-04`).
+A valid diagnosis yields an immutable, versioned proposal with reviewed `command`, `backup_cmd`, and `rollback_cmd`. It enters `PENDING_APPROVAL`, not automatic execution. Uncertain, invalid, unsafe or timed-out diagnosis escalates with sanitized evidence. The actual remediation and rollback remain under the human-approved UC-05 execution subsystem, consistent with `CHG-01` to `CHG-03` and the pending team SSH design.
 
 #### 3.3.2 Sequence 2: Verified Incident Distillation and Three-Branch Memory Evolution (`UC-07`)
 
@@ -515,70 +530,69 @@ sequenceDiagram
     autonumber
     participant C as Incident Coordinator / UC-05
     participant O as Agent & Memory Orchestrator
-    participant S as Secret Redaction Middleware
+    participant S as Local Secret Redaction
     participant L as LLM Distiller
     participant M as Memory Service
     participant DB as SQLite + FTS5
     participant G as Gin API / SSE Dispatcher
     actor U as Operator / Memory Hub
 
-    Note over C,O: Verified UC-03 convergence (or verified manual resolution) is required
-    C->>DB: Commit incident status = RESOLVED
-    C->>O: Trigger UC-07(incident_id)
-    O->>DB: Load verified fix, incident, matched memory, operator edits
-    DB-->>O: Source evidence and completed action outcomes
-    O->>S: Scrub source evidence before LLM transmission
-    S-->>O: Sanitized incident history
-    O->>L: Distill into structured memory fields
-    L-->>O: symptom_keywords, root_cause, remediation_steps, scope_tags
-    O->>S: Validate and re-scrub proposed memory text
-    S-->>O: Sanitized memory candidate
-    O->>M: commit_memory_record(incident_id, candidate, matched_memory_id, is_modified)
-    M->>DB: BEGIN IMMEDIATE; verify RESOLVED; check unique distillation receipt
+    Note over C,DB: Desired-state verification passed and unique incident-scoped job required
+    C->>DB: Atomically set RESOLVED and resolved_at and enqueue PENDING distillation job
+    Note over C,O: Crash-safe work is durable before any asynchronous trigger
+    O->>DB: Atomically claim PENDING job (or retry interrupted job)
+    DB-->>O: Incident, persisted matched_memory_id/version, verified fix, operator edits
+    O->>S: Local redaction and data-scope verification
+    S-->>O: Bounded sanitized incident evidence
+    O->>L: Distill structured candidate with request timeout
+    L-->>O: keywords, root_cause, steps, scope_tags
+    O->>S: Revalidate and re-redact candidate fields
+    S-->>O: Sanitized structured memory candidate
+    O->>M: Verify current ACTIVE match, environment scope and canonical fix
+    M->>DB: Load matched version and current lineage (if any)
+    DB-->>M: Active record or missing/incompatible match
+    M->>M: Deterministically set matched_memory_id and required is_modified
+    O->>M: commit_memory_record(incident_id,candidate,matched_memory_id,is_modified)
+    M->>DB: Start IMMEDIATE transaction and recheck RESOLVED with unique job receipt
 
-    alt Receipt already exists (retry)
-        DB-->>M: Return previously committed memory_id and branch
-        Note over M,DB: No second insert and no duplicate hit_count increment
-    else First successful distillation
-        alt No matched memory (new pattern)
-            M->>DB: INSERT ACTIVE memory (new lineage, source_incident_id)
-            DB->>DB: FTS5 insert trigger indexes searchable text
-        else Matched ACTIVE memory, unchanged verified fix
-            M->>DB: UPDATE hit_count += 1, last_verified_at, version += 1
-            Note over M,DB: Reuse existing memory ID; no new version
-        else Matched ACTIVE memory, verified modified fix
-            M->>DB: UPDATE old memory status = SUPERSEDED
-            M->>DB: INSERT new ACTIVE version with supersedes_id and provenance
-            DB->>DB: FTS5 insert trigger indexes new searchable text
+    alt Already COMPLETED or DISCARDED (idempotent retry)
+        DB-->>M: Return prior outcome, do not double-count
+    else No confirmed match - new pattern
+        M->>DB: Store candidate_json and commit job state PENDING_REVIEW
+        M-->>G: Publish safe candidate review notification
+        G-->>U: Conceptual UC-07 candidate review (API binding TBD)
+        alt Operator discards one-off
+            U->>G: Discard candidate
+            G->>DB: Commit DISCARDED receipt without creating an ACTIVE memory
+        else Operator accepts
+            U->>G: Accept candidate
+            G->>DB: INSERT new ACTIVE memory with last_verified_at=resolved_at
+            G->>DB: Commit job COMPLETED with memory.updated event
+            DB->>DB: FTS5 indexes new accepted memory
         end
-        M->>DB: INSERT memory_distillations receipt and memory.updated event
-        M->>DB: COMMIT atomic memory update plus event
+    else Matched ACTIVE memory, unchanged verified fix
+        M->>DB: Increment hit_count and version and set last_verified_at to resolved_at
+        M->>DB: Commit job COMPLETED with memory.updated event
+    else Matched ACTIVE memory, verified modified fix
+        M->>DB: Set previous status=SUPERSEDED
+        M->>DB: INSERT ACTIVE successor with supersedes_id and last_verified_at=resolved_at
+        M->>DB: Commit job COMPLETED with memory.updated event
+        DB->>DB: FTS5 indexes only currently ACTIVE version
     end
-    DB-->>M: Existing or newly committed memory ID
-    M-->>O: Memory commit outcome / branch
-    G->>DB: Read committed events in increasing event ID
-    DB-->>G: memory.updated event from durable outbox
-    G-->>U: Sanitized SSE memory.updated (ID, status, version)
-    U->>G: GET /memories/{id} to refresh if needed
-    G-->>U: Current sanitized record and lineage
-    Note over U,DB: UC-08 edits create a version; archives exit ACTIVE retrieval
+
+    G->>DB: Read committed events in monotonically increasing ID
+    DB-->>G: Sanitized memory.updated or candidate status
+    G-->>U: SSE notification to refresh candidate review or GET /memories as appropriate
+    Note over U,DB: Archived and superseded memories excluded from default search
 ```
 
-**Trigger and evidence.** Memory distillation is not an ordinary continuation of the diagnostic loop. It starts **only after** an incident has been marked `RESOLVED` through an actual desired-state convergence check (`UC-05` followed by `UC-03`) or verification of a manual repair. A proposed fix, a successful SSH exit code alone, or an unverified LLM claim is insufficient. The orchestrator aggregates the drift signature, redacted observations, confirmed root cause, successfully executed remediation, and operator modifications. Sensitive data is scrubbed before the LLM distiller sees the history and again before committing its structured output. The model proposes a memory record; it does **not** perform arbitrary SQL updates.
+**Crash-safe trigger and provenance.** A verified `RESOLVED` transition and one `PENDING` distillation job are inserted in the same SQLite transaction. A worker atomically claims the durable job and retries interrupted work after restart; the memory service uses the incident ID to verify resolution and enforce at-most-once materialization via a unique incident receipt. The prior matched memory ID and version were saved during UC-04, so a delayed worker can recover the correct historical context.
 
-**Atomic three-branch policy.** `commit_memory_record` invokes the deterministic Memory Service, which verifies that the source incident is resolved and consults the `memory_distillations(incident_id)` idempotency receipt before writing. Its three outcomes follow Part I `UC-07`:
+**Deterministic matching.** The LLM distiller proposes sanitized text but is not trusted to choose the database update branch. The Memory Service validates any selected memory against the current `ACTIVE` lineage, OS/service scope, and the incident's verified root cause/repair. It compares normalized verified steps (including operator edits) against the matched verified recipe, not merely FTS score. Unrelated or uncertain matches are routed to a new candidate; otherwise the service supplies the explicit required `is_modified` boolean. `matched_memory_id` may be null only for an unmatched candidate.
 
-| Condition | SQLite action | Retrieval effect |
-| :--- | :--- | :--- |
-| `matched_memory_id = null` | Insert a new `ACTIVE` memory, with new lineage and `source_incident_id`. | Indexed in FTS5 and eligible for relevant future searches. |
-| Match found and `is_modified = false` | Increment the existing active record's `hit_count` and refresh `last_verified_at` and row `version`. | Reuses the verified solution without creating a redundant memory version. |
-| Match found and `is_modified = true` | Mark old record `SUPERSEDED`; insert a replacement `ACTIVE` version linked through `supersedes_id`, with provenance of the new verified incident. | The current version is searchable by default; the previous version remains auditable. |
+**New candidate review and three-branch policy.** The operator-facing accept/discard transport remains an open integration decision with the Web/API owner; this sequence does not define a new public route. For an unmatched incident, the structured candidate remains `PENDING_REVIEW` and is **not** indexed into active FTS5 until the operator accepts it. The operator may discard a one-off anomaly; a `DISCARDED` receipt remains for idempotency. Accepted new memories set `last_verified_at` from the incident's actual verification time. An unchanged matched fix increments `hit_count`, while a modified matched fix creates a new active successor and supersedes the prior version; both use the incident verification time. Edits later made only through UC-08 must not imply a newly verified repair. Any `COMPLETED` or `DISCARDED` job is idempotent, so repeated signals cannot create duplicate versions or double-count use.
 
-All successful writes, the incident-scoped distillation receipt, and the durable `memory.updated` event are committed **in one SQLite transaction**. A worker retry after an uncertain response reads the receipt and returns the earlier result rather than creating a duplicate record or counting the same incident twice. SQLite FTS5 triggers maintain the index for newly inserted or text-modified records. The default `search_memory` query filters out `SUPERSEDED` and `ARCHIVED` records; retained versions are available for history and operator review. A user-initiated edit through the `UC-08` API also creates a new version but **must not fabricate a new verification timestamp**. The UI is notified with `memory.updated` through the durable SSE outbox (`ADR-04`) and can refresh the latest record and version lineage.
-
-**Consistency and failure handling.** If the distiller returns invalid structured fields, redaction cannot be completed, or SQLite commits fail, `UC-07` records an operational failure/retry state without publishing a verified reusable memory. The confirmed `RESOLVED` incident is not reverted solely because post-resolution memory distillation failed. A missing, archived, superseded, or stale `matched_memory_id` must be revalidated against the current lineage before applying the reuse or revision branch; the service must not silently update a non-current version. The proposed design keeps AI output advisory, makes data changes deterministic and auditable, and separates the Memory Service from the security-sensitive SSH executor.
-
-**Cross-section traceability.** Sequence 1 covers `UC-04` + `UC-09`, the new interceptor boundary in `CHG-03`, bounded diagnosis and context control in Section 2.7, and the `PENDING_APPROVAL` handoff to `UC-05`. Sequence 2 covers `UC-07` + `UC-08`, the `memories`/`memories_fts`/`memory_distillations` tables from Section 3.2, the three-branch memory decision in `ADR-02`, and the durable `memory.updated` event expected by the REST/SSE interface (`ADR-04`).
+**API and safety alignment.** All evidence and distillation outputs are locally redacted and size-bounded before model transmission or persistence. Resource changes and sanitized `memory.updated` events are committed atomically to the durable event log. The Web/UI dispatcher streams the event only after commit, and default retrieval excludes `ARCHIVED` or `SUPERSEDED` records. Distillation failure does not undo a verified incident resolution; the durable work record transitions to retriable `FAILED` with bounded backoff and explicit operator visibility.
 
 ### 3.4 State Machine Diagrams
 
