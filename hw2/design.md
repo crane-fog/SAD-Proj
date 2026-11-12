@@ -159,7 +159,7 @@ flowchart LR
 
 【每个人都撰写，最后徐佳咏整理总结】
 
-【徐之涵】【马小云】【刘宸瑞】
+【徐之涵】【刘宸瑞】
 
 #### ADR-01: Single-Binary Agentless Control Plane with Per-Node Lease Locking
 
@@ -167,6 +167,23 @@ flowchart LR
 - **Options**: (1) Distributed microservices + Redis locks + remote agents; (2) Uncoordinated SSH goroutines; (3) Single-binary Go daemon with SQLite-backed Per-Node Lease Locks.
 - **Decision**: Adopt Option 3, enforcing a per-node lock state machine (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`) with heartbeat-renewed TTLs (`lease_expires_at`).
 - **Consequences**: Identical drift signals on a locked node coalesce into the active incident (`coalesced_count++`), distinct drifts queue serially (`QUEUED_ON_LOCK`), and `REMEDIATING` locks suppress routine `UC-03` probes until post-repair verification completes. Heartbeat TTLs prevent deadlocked nodes if an SSH or LLM session hangs.
+
+#### ADR-04: REST Commands and Server-Sent Events for Live Feedback
+
+- **Author / status**: Ma Xiaoyun (2352626); selected for the Part II design, pending Part III implementation validation.
+- **Context**: Vue 3 must display long-running diagnosis and repair progress without blocking navigation. Gin must preserve the approval gate, node lease ownership, and an auditable command history even if a browser disconnects. The client needs server-to-browser updates; approvals and edits are discrete requests.
+- **Alternatives**:
+
+| Option | Benefits | Costs / limitations |
+| :--- | :--- | :--- |
+| Periodic REST polling | Simple HTTP infrastructure; easy retry | Repeated empty requests and delayed progress; useful only as a degraded mode |
+| WebSocket | Full duplex and low message overhead | Application-defined reconnect, replay and authorization handling; unnecessary for discrete operator commands |
+| REST + SSE (selected) | Native browser EventSource, named events, ordered IDs and reconnect support; ordinary HTTP command semantics | One-way text stream; proxy buffering and replay retention require explicit design |
+
+- **Decision**: Use versioned JSON REST endpoints for reads and commands and one multiplexed, same-origin SSE connection per active console tab. Stream sanitized diagnostic summaries, reviewed tool outcomes, plan revisions and execution progress. Never stream raw private model reasoning or credentials. REST responses and persisted resource snapshots remain authoritative; SSE does not execute commands.
+- **Rationale**: This fits the embedded Vue/Gin deployment and separates explicit operator intent from background observation. An approval references an immutable plan revision and an idempotency key, so reconnecting or clicking twice cannot create another execution.
+- **Consequences**: Commit each state change and its event record in one SQLite transaction, then publish. Resume from `Last-Event-ID`; when history expires, send `stream.reset` and obtain a fresh snapshot. Disable approval while disconnected or refreshing. Heartbeats and disabled proxy buffering are required. A bounded slow-client queue disconnects lagging consumers for replay instead of blocking SSH workers. These event records are a proposed integration requirement for Section 3.2, rather than an existing implemented table.
+- **Validation**: Interrupt a stream during execution, replay duplicate events, submit approval twice, and approve an obsolete revision. The UI must converge to the persisted snapshot, one execution must be scheduled, and obsolete approval must fail with `409`.
 
 ### 2.5 Quality attributes
 
@@ -206,7 +223,167 @@ flowchart LR
 
 ### 3.6 API Interfaces
 
-【马小云】
+**Owner: Ma Xiaoyun (2352626).** The following is the proposed implementation contract between the Vue 3 console and the Gin gateway. Paths are relative to `/api/v1`. Identifiers are opaque strings; timestamps use UTC RFC 3339. DTOs expose domain resources rather than SQLite rows. State names below follow the conceptual states in Sections 1 and 4; other diagram owners should use the same vocabulary when integrating their sections.
+
+#### 3.6.1 Shared conventions and trust boundary
+
+| Concern | Contract |
+| :--- | :--- |
+| Transport | Same-origin HTTPS in deployed environments; JSON requests and responses, except `text/event-stream`. Loopback-only local development may use HTTP. |
+| Authentication | Authenticated operator session in an HttpOnly, SameSite=Strict cookie; Secure under HTTPS. `GET /session` returns operator identity and a CSRF token. Session provisioning/login is a gateway integration dependency, not a new multi-user account subsystem. |
+| Authorization | Every endpoint, including SSE and replay, verifies the session and resource access. Unsafe methods require `X-CSRF-Token` and an allowed Origin. No session or SSH secrets in URLs, event payloads, or browser storage. |
+| Responses | Success: `{"data": ..., "request_id": "req-42"}`. Lists add `page: {next_cursor: string or null}`. A `204` has no body. Errors use the envelope below. |
+| Pagination | List endpoints accept `limit` (default 20, maximum 100) and opaque `cursor`; ordering is stable by `(created_at, id)`. Memory search orders by relevance then ID; its cursor binds the query/filter. |
+| Concurrency | Mutable resource responses include an ETag derived from `version`. PATCH, DELETE and activation require `If-Match`; missing preconditions return `428`, stale versions `412`. Approval additionally checks `plan_revision` and current incident state atomically. |
+| Retry safety | Asynchronous command POSTs require `Idempotency-Key`. Persist key, operator, route, request hash and response with command acceptance. Matching retries return the original operation; key reuse with different input returns `409`. Retain keys for at least 24 hours; after that, clients must inspect the operation before any new submission. |
+| Asynchronous work | `202` includes `{operation_id, status: "Queued", resource_id}` and a `Location` header for `GET /operations/{id}`. Operation status is `Queued`, `Running`, `Succeeded` or `Failed`; acceptance is never presented as success. |
+| Validation / errors | `400` malformed JSON; `401` no session; `403` denied/CSRF/safety block; `404` absent resource; `409` state/lease conflict; `413` oversized input; `422` semantic validation; `429` throttled; `503` service unavailable. `429`/`503` may include `Retry-After`. |
+| Sensitive fields | Node credentials are write-only and encrypted server-side. Responses return `credential_configured`, never a key/passphrase. Logs, memory content and event text are redacted before persistence/egress and rendered as text, never executable HTML. |
+
+```json
+{
+  "error": {
+    "code": "PLAN_REVISION_CONFLICT",
+    "message": "The plan changed. Reload and review revision 4.",
+    "details": {"current_revision": 4}
+  },
+  "request_id": "req-42"
+}
+```
+
+#### 3.6.2 Resource representations
+
+| Resource | Required read fields and meaning |
+| :--- | :--- |
+| Node | `id, name, host, port, username, credential_configured, host_key_fingerprint, connection_status, health_status, lock_state, active_incident_id, last_probe_at, version`. Connectivity, health and lock state are separate; an unreachable node is not implicitly healthy. |
+| Manifest | `id, node_id, name, yaml, version, active, validation_status, updated_at`. Draft edits do not replace the active revision until activation succeeds. |
+| Incident | `id, node_id, manifest_id, manifest_version, status, drift_summary, coalesced_count, root_cause_summary, plan_revision, actions, version, updated_at`. Details include sanitized observations and matched memory IDs. |
+| Plan action | `id, order, description, command, risk_level, backup_cmd, rollback_cmd, review_status, backup_status, execution_status, rollback_status, exit_code`. Classification uses `READ_ONLY`, `MUTATING`, `DESTRUCTIVE`; execution uses `Pending`, `Running`, `Succeeded`, `Failed`, `Skipped`, `Unknown`. |
+| Memory | `id, symptom_keywords, root_cause, remediation_steps, scope_tags, status, version, supersedes_id, source_incident_id, hit_count, last_verified_at`. Status is `Active`, `Superseded`, or `Archived`. Editing a verified fix creates a new version and preserves provenance. |
+| Operation | `id, kind, resource_id, status, created_at, finished_at, result, error`. A failed operation does not imply that remote effects were reverted. |
+
+#### 3.6.3 Node and manifest APIs (UC-01, UC-02, UC-03)
+
+| Method and path | Request / query | Success and behavior |
+| :--- | :--- | :--- |
+| `GET /nodes` | Optional `health_status`, pagination | `200` paginated node summaries |
+| `POST /nodes` | `name, host, port` (default 22), `username, credential: {private_key, passphrase?}, host_key_fingerprint` | `201` node + Location; reject invalid addresses/port ranges; trust fingerprint supplied after out-of-band verification |
+| `GET /nodes/{id}` | None | `200` node detail + ETag |
+| `PATCH /nodes/{id}` | Changed connection fields or replacement credential; If-Match | `200` updated node; `409` if connection changes conflict with active work |
+| `DELETE /nodes/{id}` | If-Match | `204` unregister and remove stored credential; `409` while work is active; never uninstall software from the remote host |
+| `POST /nodes/{id}/connection-tests` | Empty JSON; idempotency key | `202` operation for SSH authentication and pinned host-key verification; mismatch fails closed |
+| `POST /manifests/validate` | `node_id, yaml` (maximum 64 KiB UTF-8) | `200 {valid: true, normalized_summary}` or `422` with `line, column, field, message` errors; no save, probe or shell execution |
+| `GET /nodes/{id}/manifests` | Pagination | `200` saved policy revisions and active selection |
+| `POST /nodes/{id}/manifests` | `name, yaml` | `201` validated draft, inactive; server revalidates content |
+| `GET /manifests/{id}` | None | `200` policy + ETag |
+| `PATCH /manifests/{id}` | `yaml` and/or `name`; If-Match | `200` new draft version; invalid input `422`; active revision remains pinned |
+| `POST /manifests/{id}/activations` | `version`; If-Match and idempotency key | `202` activation operation; revalidate and atomically switch the active revision; `409` during conflicting node work |
+| `GET /nodes/{id}/drift` | None | `200 {manifest_version, observed_at, fresh, checks[]}`; each check contains `resource, expected, actual, result`; absent observations are explicitly unknown |
+
+YAML validation uses a safe schema parser, rejects unknown resource types and duplicate keys, and bounds aliases/depth. The frontend's feedback is advisory; the backend performs the same validation on every save and activation. Authentication failure, host-key mismatch and timeout are distinct connection-test error codes.
+
+#### 3.6.4 Incident, approval and execution APIs (UC-04, UC-05, UC-09)
+
+| Method and path | Request / query | Success and constraints |
+| :--- | :--- | :--- |
+| `GET /incidents` | Optional `node_id, status`, pagination | `200` incident summaries, including `Queued_On_Lock` and coalesced counts |
+| `GET /incidents/{id}` | None | `200` authoritative detail, plan, action progress and ETag |
+| `PATCH /incidents/{id}/plan` | `plan_revision, actions[]`; If-Match | `200` new revision with `review_status: Pending`; invalidates previous approval and schedules review of commands, backups and rollback commands |
+| `POST /incidents/{id}/approvals` | `plan_revision, decision` (`approve` or `reject`), `feedback`; idempotency key | `202` accepted execution or re-planning operation; rejection requires nonempty feedback. Approval is allowed only for the current reviewed plan in `Pending_Approval` |
+| `POST /incidents/{id}/rollbacks` | `execution_id, plan_revision, reason`; idempotency key | `202` compensation operation; only after execution stops and backup/step outcomes are assessed; stale state or no eligible recovery returns `409` |
+| `POST /incidents/{id}/replans` | `feedback`; idempotency key | `202` diagnosis operation after rejection or a settled failure; cannot overlap execution or recovery |
+| `POST /incidents/{id}/resolutions` | `resolution_note`; idempotency key | `202` verification of a reported manual repair; only a successful desired-state probe marks it `Resolved` |
+| `GET /operations/{id}` | None | `200` command result; supports recovery after a lost HTTP response |
+
+The server atomically checks session, plan revision, review verdict, incident state and node lease before scheduling execution. `DESTRUCTIVE` commands remain blocked even when an operator clicks Approve. A browser disconnect does not cancel accepted work. Backups must succeed before their associated mutation starts; failures stop subsequent steps. A failed SSH command can have partially changed state: the executor assesses the failed step as well as completed steps before selecting compensation. Unknown effects are shown as `Unknown` and may require manual escalation. Rollback is a separate explicit action, uses reviewed compensation in reverse dependency order, and does not imply desired-state convergence. `Resolved` requires a fresh probe.
+
+Example approval request and response:
+
+```http
+POST /api/v1/incidents/inc-104/approvals
+Content-Type: application/json
+X-CSRF-Token: <session-token>
+Idempotency-Key: 6769b62d-3bfe-4f96-a3a6-1dc1408e10e1
+
+{"plan_revision":3,"decision":"approve","feedback":"Reviewed backup and service interruption."}
+```
+
+```json
+{
+  "data": {"operation_id":"op-207","status":"Queued","resource_id":"inc-104"},
+  "request_id":"req-42"
+}
+```
+
+#### 3.6.5 Memory and interactive diagnosis APIs (UC-06, UC-07, UC-08)
+
+| Method and path | Request / query | Success and behavior |
+| :--- | :--- | :--- |
+| `GET /memories` | `q, scope_tag, status` (default Active), pagination | `200` FTS5 keyword results with provenance and verification timestamps; user text is escaped/parameterized, not concatenated into SQL/FTS syntax |
+| `GET /memories/{id}` | None | `200` record + ETag and version lineage |
+| `PATCH /memories/{id}` | Edited `symptom_keywords, root_cause, remediation_steps, scope_tags`; If-Match | `200` new current version, old one Superseded; does not fabricate a fresh verification timestamp |
+| `POST /memories/{id}/archives` | `reason`; If-Match and idempotency key | `200` Archived record excluded from default retrieval; retains incident audit links |
+| `POST /chat-sessions` | `node_id` | `201` session bound to an authorized node |
+| `POST /chat-sessions/{id}/messages` | `content` (1–8000 characters); idempotency key | `202` message operation; streamed response uses the same review/redaction pipeline; mutating proposals create an incident requiring approval |
+
+Memory distillation is an internal UC-07 action after verified resolution; the browser has no unrestricted endpoint for claiming a fix is verified or changing `hit_count`. Archiving, rather than physical deletion, implements removal from the active retrieval pool.
+
+#### 3.6.6 SSE event contract and recovery
+
+`GET /events` multiplexes authorized node, incident, operation, memory and chat updates on one connection. An initial `GET /sync` returns `{nodes, active_incidents, operations, event_cursor}` from one consistent database snapshot. The client then opens `/events?after=<event_cursor>`; on automatic reconnect the `Last-Event-ID` header takes precedence. Historical details and memory search use their normal REST endpoints.
+
+```text
+id: 1042
+event: action.updated
+retry: 3000
+data: {"schema_version":1,"occurred_at":"2026-11-12T07:20:00Z","resource_type":"incident","resource_id":"inc-104","resource_version":8,"payload":{"action_id":"a2","execution_status":"Failed","exit_code":1,"summary":"Service restart failed; remaining actions skipped."}}
+
+```
+
+| Event | Payload / UI use |
+| :--- | :--- |
+| `node.updated` | Node health, connection and lock state; update fleet badges |
+| `diagnosis.summary` | Sanitized observation, tool outcome and turn index; append concise evidence |
+| `plan.updated` | Revision and review status; invalidate an obsolete approval dialog |
+| `incident.updated` | State and coalesced count; update incident status |
+| `action.updated` | Backup, execution or compensation progress; update individual step |
+| `operation.updated` | Command status and result reference; settle a pending request |
+| `memory.updated` | Record ID, status and version; refresh search/detail if visible |
+| `chat.message` | Message ID, sanitized text fragment and completion flag |
+| `stream.reset` | Reason `cursor_expired` or `cursor_invalid`; close, resnapshot and reopen |
+
+Events have durable monotonically increasing IDs. Delivery is at least once: the Vue store ignores duplicate IDs and older resource versions, and fetches details if a version gap occurs. Proposed retention is 24 hours with a 100,000-event cap; either limit can require a reset. Heartbeat comments (`: heartbeat`) every 15 seconds carry no business update. Gin flushes events immediately with `Cache-Control: no-cache`; reverse proxies must disable buffering and permit an idle timeout above the heartbeat interval. Payloads are bounded to 16 KiB; longer outputs are truncated with an explicit marker and retrieved as bounded, redacted detail pages if implemented.
+
+After 45 seconds without traffic, show a stale-data banner and disable mutation controls. Reconnect normally; on reset, refresh `/sync` before re-enabling actions. If SSE repeatedly fails, poll visible resource snapshots every five seconds with backoff; require a fresh incident read before any approval, and still rely on server-side revision validation. Session expiration closes the stream and routes the user to session reauthentication. Streaming failure never triggers a retry of an approval POST with a new key.
+
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant UI as Vue Console
+    participant API as Gin Gateway
+    participant DB as SQLite
+    participant Worker as Remediation Worker
+    UI->>API: GET /sync
+    API->>DB: Read consistent snapshot and cursor
+    API-->>UI: Snapshot and cursor 1040
+    UI->>API: GET /events?after=1040
+    Operator->>UI: Review and approve revision 3
+    UI->>API: POST approvals (revision 3, idempotency key)
+    API->>DB: Atomically validate, accept command and append event
+    alt Stale revision or conflicting state
+        API-->>UI: 409; reload plan
+    else Accepted once
+        API-->>UI: 202 with operation ID
+        Worker->>DB: Claim accepted operation
+        Worker->>Worker: Backup, execute, verify or stop on failure
+        Worker->>DB: Persist step state and event atomically
+        API-->>UI: SSE action.updated
+        Note over UI,API: Connection lost; accepted work continues
+        UI->>API: Reconnect with Last-Event-ID
+        API->>DB: Read retained events after cursor
+        API-->>UI: Replay or stream.reset
+    end
+```
 
 ---
 
@@ -228,11 +405,142 @@ flowchart LR
 
 ### 5.1 Key Screens Mockups
 
-【马小云】
+**Owner: Ma Xiaoyun (2352626).** The console retains the four primary HW1 screens and adds explicit lease, revision, connection and recovery states. The following standalone HTML files are static design prototypes with fictional data; they do not connect to a server or execute commands. Their navigation links support presentation walkthroughs. Form-like values and action labels illustrate the intended Vue components, not an implemented application.
+
+| Screen / route | Main components and actions | Requirements and changes |
+| :--- | :--- | :--- |
+| Fleet / `/nodes` | Health summary, node table, connection result, lease owner, pending-approval entry | UC-01/03; distinguish unreachable from drifted; expose queued incidents and coalescing (CHG-02) |
+| Policy / `/nodes/:id/policy` | YAML editor, validation errors, revision selector, desired/observed comparison | UC-02/03; save draft separately from activation; preserve the active policy on invalid edits |
+| Incident / `/incidents/:id` | Sanitized evidence, root-cause summary, plan review, backups, per-step outcomes, recovery panel | UC-04/05/09; fresh approval after edits (CHG-03); failure and compensation visibility (CHG-01) |
+| Memory / `/memories` | Keyword/scope filters, source incident, version lineage, edit/archive controls | UC-07/08; distinguish reused, superseded and archived knowledge; preserve provenance |
+
+#### 5.1.1 Fleet overview and node onboarding
+
+[Open the fleet prototype](./mockups/screen1_overview.html).
+
+The operator sees separate health and execution-lock badges, the last successful probe time, and the active incident for each node. The registration drawer collects a host, port, SSH user, write-only credentials and a fingerprint verified out of band. Connection testing reports authentication failure, host-key mismatch and timeout separately. An empty fleet presents an Add node entry and a short onboarding checklist. A stale observation never renders as a green Healthy state.
+
+@import "./mockups/screen1_overview.html"
+
+#### 5.1.2 Policy builder and drift inspector
+
+[Open the policy prototype](./mockups/screen2_policy.html).
+
+The YAML editor shows line/column errors and a plain-language intent summary. Validate checks the current content without saving or executing it. Save draft retains a candidate revision; Activate requires server revalidation and a matching revision. A lease conflict keeps the draft and explains why activation is unavailable. The comparison panel labels its policy version and observation timestamp, making old probe results distinguishable from results for a newly activated policy. Navigation away from unsaved edits requires a discard/keep-editing choice.
+
+@import "./mockups/screen2_policy.html"
+
+#### 5.1.3 Diagnosis, approval and recovery console
+
+[Open the incident prototype](./mockups/screen3_approval.html).
+
+The page presents two labeled snapshots of the same example incident: before approval and after partial failure. These snapshots are not simultaneous live states. The approval view shows the target node, immutable revision, sanitized evidence, exact commands, risk classification, backup and compensation plan. The operator reviews the complete ordered plan; arbitrary checkbox selection of dependent steps is not supported. Editing creates a new revision and disables approval until review completes. Reject requires feedback. Confirmation repeats the node, revision and expected service impact.
+
+The progress view differentiates backup, mutation and rollback outcomes. A failed backup prevents mutation; a failed command stops later commands. If a response is lost or SSH times out, the UI shows an unknown result until the server reconciles it. Recoverable partial failure offers a separately confirmed rollback with its scope and limits. Rollback failure or uncertain effects surface escalation rather than a success toast. A successful rollback restores prior state; a successful desired-state probe is separately required for resolution. The connection banner records the last event time; stale data disables approval while the UI resynchronizes.
+
+@import "./mockups/screen3_approval.html"
+
+#### 5.1.4 Adaptive memory hub
+
+[Open the memory prototype](./mockups/screen4_memory.html).
+
+Search supports keyword and scope filters and shows Active records by default. Detail includes the source incident, verified time, hit count and revision lineage. Editing a reusable fix creates a new version, while archiving removes a one-off result from active retrieval after confirmation. Neither action modifies historical execution evidence or falsely marks an edited fix as verified. No-result, loading and failed-search states retain the user's query. Interactive chat is a secondary node-scoped panel: read-only probes use the normal safety gate, and any mutating proposal links to the same incident approval screen.
+
+@import "./mockups/screen4_memory.html"
+
+#### 5.1.5 Interaction, accessibility and frontend state
+
+- **Feedback and recovery**: Pending requests show progress and disable duplicate submissions. Server validation errors appear next to fields and in a focusable summary; a `request_id` is available for troubleshooting. A `409`/`412` preserves local edits for comparison but requires reload and review before resubmission.
+- **Accessibility**: Status badges use text as well as color. Inputs have visible labels; dialogs trap focus and restore it on close; keyboard focus remains visible. Summarized progress uses a polite live region rather than announcing every streamed fragment. Color contrast targets WCAG 2.2 AA (4.5:1 for normal text), subject to Part III verification.
+- **Responsive layout**: Desktop uses a sidebar and two-column detail panels. Below 800 px the panels stack; long code wraps or scrolls within its own area. Critical confirmation controls remain reachable without relying on hover.
+- **Vue ownership**: Route views compose NodeTable, PolicyEditor, IncidentTimeline, PlanReview, ActionProgress and MemoryDetail components. A shared resource store owns snapshots, versions and connection freshness. Editor drafts remain separate from server state; the single tab-level event service updates the store and closes on logout. A route change must not cancel an accepted backend operation.
 
 ### 5.2 User Flows
 
-【马小云】
+#### 5.2.1 Onboard a node and activate a policy
+
+```mermaid
+flowchart TD
+    A[Open fleet overview] --> B[Register SSH details and verified fingerprint]
+    B --> C[Test connection]
+    C --> D{SSH and host key valid?}
+    D -- No --> E[Show specific error and preserve safe fields]
+    E --> B
+    D -- Yes --> F[Choose template and edit YAML]
+    F --> G[Validate on server]
+    G --> H{Valid?}
+    H -- No --> I[Show field and line errors]
+    I --> F
+    H -- Yes --> J[Save draft revision]
+    J --> K[Request activation]
+    K --> L{Revision current and node available?}
+    L -- No --> M[Keep draft and explain conflict]
+    M --> F
+    L -- Yes --> N[Activate and await fresh scheduled probe]
+    N --> O[Show timestamped desired versus observed state]
+```
+
+#### 5.2.2 Diagnose, approve, verify and recover
+
+```mermaid
+flowchart TD
+    A[Open incident from fleet] --> B[Read sanitized diagnosis and current plan]
+    B --> C{Operator decision}
+    C -- Edit --> D[Save new revision and rerun safety review]
+    D --> B
+    C -- Reject --> E[Submit feedback for re-planning]
+    E --> B
+    C -- Approve --> F[Confirm target and reviewed revision]
+    F --> G{Server accepts revision and lease?}
+    G -- No --> B
+    G -- Yes --> H[Back up and execute ordered actions]
+    H --> I{Execution result}
+    I -- All succeeded --> J[Probe desired state]
+    J --> K{Converged?}
+    K -- Yes --> L[Resolved and distill memory]
+    K -- No --> E
+    I -- Backup or action failure --> M[Stop and show per-step effects]
+    I -- Unknown effects --> N[Reconcile or escalate for manual recovery]
+    M --> O{Recovery assessment}
+    O -- Compensation available --> P[Operator confirms rollback scope]
+    P --> Q[Compensate and verify recovery]
+    Q --> R{Recovery succeeded?}
+    R -- Yes --> E
+    R -- No --> N
+    O -- No safe compensation --> N
+    N --> S[Operator reports manual repair]
+    S --> J
+```
+
+Connection loss is orthogonal to this business flow: accepted work continues while the UI reconnects. No disconnected page may infer completion from elapsed time. The snapshot/replay sequence in Section 3.6.6 restores the visible state without resubmitting work.
+
+#### 5.2.3 Curate reusable memory
+
+```mermaid
+flowchart LR
+    A[Search keywords and scope] --> B[Inspect fix and source incident]
+    B --> C{Curation decision}
+    C -- Keep --> D[Leave active for retrieval]
+    C -- Edit --> E[Save with version precondition]
+    E --> F[Create new version and supersede old record]
+    C -- Archive --> G[Confirm exclusion from future retrieval]
+    G --> H[Retain provenance as archived record]
+```
+
+#### 5.2.4 Part III usability and contract checks
+
+| Scenario | Observable acceptance criterion |
+| :--- | :--- |
+| First-time onboarding | A Linux/SSH-familiar user registers three test nodes and activates a template within the SRS ten-minute target; failed connections identify a corrective action |
+| Invalid YAML / conflicting activation | Line/field errors are understandable; the current active revision remains unchanged; the draft is recoverable |
+| Plan edit / stale browser tab | Editing forces a new review; the old tab cannot approve the obsolete revision; blocked commands never become executable |
+| Double click / lost response | Same idempotency key returns the same operation; no second repair starts |
+| Disconnect during repair | Progress resynchronizes without duplicate timeline entries or a repeated mutation; expired replay history causes a clean snapshot reset |
+| Backup failure / partial mutation | The UI distinguishes no mutation from partial/unknown effects, stops later steps and displays the recovery outcome accurately |
+| Memory curation | Archived records disappear from default results; edited content retains lineage and cannot claim unperformed verification |
+| Keyboard and narrow viewport | All review/confirmation actions are keyboard reachable; focus order is logical and long commands do not hide critical controls |
+
+These are planned checks, not completed user-study or production-test results.
 
 ---
 
@@ -240,11 +548,20 @@ flowchart LR
 
 【每个人都撰写至少一条，最后徐佳咏整理总结】
 
-【徐之涵】【马小云】【刘宸瑞】
+【徐之涵】【刘宸瑞】
 
 1. **Lock Starvation & Cascade Resolution of Queued Incidents**:
     - Uncertainty: While an incident waits in `PENDING_APPROVAL` for operator review, distinct drifts on the same node wait in `Queued_On_Lock`. Delayed human approval could delay diagnosing secondary drifts, or the primary fix (e.g., freeing disk space) might implicitly resolve the queued drift.
     - Part III PoC Validation: Test a two-tier lock (allowing read-only `UC-04` diagnosis under a shared lock while `PENDING_APPROVAL` is idle, reserving exclusive locks for `REMEDIATING`) and enforce an automatic `UC-03` re-probe on dequeue to auto-close already healed incidents.
+
+2. **Stale Approval and SSE Replay Consistency (Ma Xiaoyun)**:
+    - Uncertainty: Browser reconnection, multiple tabs, proxy buffering and bounded replay retention can leave a visible plan behind the server state. Native EventSource reconnection alone does not guarantee consistent UI state or exactly-once execution.
+    - Proposed mitigation: Durable state/event transactions, snapshot cursors, resource versions, revision-bound approval and persisted idempotency keys (ADR-04, Section 3.6). State and event history retention must be agreed with the database owner.
+    - Part III validation: Disconnect for both shorter and longer than the replay window; duplicate events; restart Gin; submit approval from two tabs; lose the approval HTTP response. Pass if state converges after recovery, obsolete approval is rejected, and each accepted command starts at most one execution. A crash during remote mutation must surface an unknown outcome rather than blindly re-executing it.
+
+3. **Recovery Scope and Operator Comprehension (Ma Xiaoyun)**:
+    - Uncertainty: A failed command may have partial side effects, while a successful rollback may restore the previous unhealthy state. The existing CHG-01 shorthand of rolling back only steps before the failure needs coordination with the execution owner for failed-step assessment.
+    - Part III validation: Inject a backup failure, a partially applied command, and a compensation failure. Ask operators to identify which steps changed the host and whether desired state has actually converged. Keep recovery, verification and resolution visibly distinct; require manual escalation when effects cannot be established safely.
 
 ---
 
@@ -267,7 +584,13 @@ flowchart LR
 
 ### mxy
 
-【马小云】
+- **Tool chain**: OpenAI Codex assisted this Part II drafting session with repository inspection, English technical writing, API contract design, Mermaid flows and HTML mockups.
+- **Cost**: covered by GPT plus subscription.
+- **Benefits**: AI helped translate the task allocation and HW1 requirements into a consistent REST/SSE proposal, enumerate exceptional UI states and produce reusable screen artifacts.
+- **Limitations**: Generated contracts can introduce unimplemented assumptions, including session authentication, durable event retention and revision-based concurrency. They require agreement with the backend, database and execution owners. HTML prototypes demonstrate layout and navigation rather than a working Vue/Gin system.
+- **Verification in this session**: The draft was compared with the task allocation, existing design and HW1 requirements. Static checks cover prototype references and section completeness; the PoC, fault-injection and usability checks listed in Section 5.2.4 remain future work. 
+- **Design corrections**: Approval is tied to a reviewed revision; edited commands are re-reviewed; SSE reconnect does not resubmit mutations; compensation is distinguished from desired-state resolution; diagnostic output uses sanitized summaries .
+- **Artifacts**: ADR-04; Section 3.6; Section 5; the four HTML prototypes in `hw2/mockups`; personal open issues and annotated references. .
 
 ### lcr
 
@@ -279,11 +602,32 @@ flowchart LR
 
 【每个人按需撰写】
 
-【徐之涵】【马小云】【刘宸瑞】
+【徐之涵】【刘宸瑞】
 
 1. **B. Beyer, C. Jones, J. Petoff, and N. R. Murphy, Eds., _Site Reliability Engineering: How Google Runs Production Systems_. Sebastopol, CA, USA: O'Reilly Media, 2016.**
    This foundational work formalizes Site Reliability Engineering (SRE) principles including declarative state management, toil elimination through idempotent automation, alert deduplication, and safe change management. Chapters on Eliminating Toil, Practical Alerting, and Data Processing Pipelines demonstrate how uncoordinated automation and concurrent alert storms often worsen production incidents rather than resolving them.
    These principles directly shaped our State Reconciliation Engine and Per-Node Lease Lock Coordinator (`Section 2.1`, `ADR-01`). Rather than treating periodic SSH checks as stateless cron jobs that blindly invoke an LLM on every failure tick, we separated deterministic drift detection (`UC-03`, \$0 token cost) from bounded agentic diagnosis (`UC-04`). Specifically, the book's analysis of concurrent automation hazards motivated our per-node lock state machine (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`), which coalesces duplicate drift alerts, serializes distinct faults on the same host, and suppresses routine health probes during active `REMEDIATING` windows. Finally, its emphasis on post-change verification informed our mandatory post-remediation `UC-03` convergence check before marking any incident `Resolved`.
+
+2. **WHATWG, _HTML Living Standard_, “Server-sent events.”** <https://html.spec.whatwg.org/multipage/server-sent-events.html>
+   This specification defines the browser EventSource interface and the text/event-stream format, including named events, event identifiers, retry intervals, and reconnection behavior. It provides the protocol foundation for the live diagnostic and remediation feedback proposed in ADR-04. The distinction between a persistent observation channel and discrete operator commands is particularly relevant to this project: the browser receives progress continuously, while approval remains an explicit authenticated HTTP request with its own validation and audit trail.
+
+   The specification influenced the event envelope and recovery sequence in Section 3.6.6. Named events separate node changes, diagnostic summaries, plan revisions, and individual action outcomes. Event identifiers allow a reconnecting client to indicate its last observed position. Heartbeat comments keep otherwise idle connections observable without inventing business events. A single multiplexed stream per console tab also reduces unnecessary connections as the operator navigates between screens.
+
+   A critical limitation is that native reconnection does not create durable application history or guarantee exactly-once effects. Accordingly, our design adds persisted event records, bounded retention, snapshot cursors, duplicate suppression, and explicit reset handling. Approval idempotency belongs to the REST command path rather than the streaming protocol. Part III must test these application guarantees through disconnection, process restart, expired cursors, and slow consumers. This reference supports the transport choice, but it does not establish that our proposed database and frontend recovery implementation is correct.
+
+3. **R. Fielding, M. Nottingham, and J. Reschke, _HTTP Semantics_, RFC 9110, June 2022.** <https://www.rfc-editor.org/rfc/rfc9110>
+   RFC 9110 defines the semantics shared by HTTP implementations, including request methods, representation metadata, conditional requests, and response status codes. It is relevant because the Vue console and Gin gateway require a predictable interface for both ordinary resource management and potentially consequential remediation commands. Consistent semantics help the frontend distinguish a successful read, an accepted background operation, a validation problem, and a conflict with current server state.
+
+   Section 3.6 applies these ideas by keeping resource retrieval on GET and using explicit POST commands for approval, activation, and recovery. A 202 response means that work has been accepted; it does not claim that the remote host has been repaired. The returned operation resource allows the client to inspect eventual results even after an HTTP response is lost. ETag and If-Match preconditions protect policy and memory edits from overwriting newer versions. The additional plan revision check binds approval to the exact content reviewed by the operator.
+
+   The reference also clarifies an important design boundary: POST is not inherently idempotent. Our persisted Idempotency-Key behavior is an application contract that requires atomic acceptance, request fingerprinting, and explicit retention. It cannot make arbitrary SSH effects transactional. After a worker crash, uncertain remote outcomes still require reconciliation rather than blind execution. Part III should therefore test stale edits, repeated submissions, conflicting key reuse, and lost responses separately from execution recovery. HTTP semantics provide a common vocabulary for these outcomes, while domain invariants remain the responsibility of the control plane.
+
+4. **W3C, _Web Content Accessibility Guidelines (WCAG) 2.2_, Recommendation.** <https://www.w3.org/TR/WCAG22/>
+   WCAG 2.2 defines technology-independent accessibility success criteria organized around perceivable, operable, understandable, and robust interfaces. Its guidance is relevant to an operations console because critical information must remain understandable when users navigate by keyboard, use assistive technology, or work on a small screen. A visually attractive dashboard is insufficient if an operator cannot distinguish a stale observation from a verified result or cannot reach the approval controls reliably.
+
+   The guidance influenced Section 5.1.5 in several concrete ways. Health and execution badges include explicit text instead of relying on color alone. Validation feedback identifies the relevant YAML field or line and preserves the user's draft. Keyboard focus should remain visible, enter confirmation dialogs predictably, and return to the initiating control when a dialog closes. Progress updates should be summarized in a polite live region so that frequent SSE messages do not overwhelm a screen reader. Long shell commands need wrapping or local scrolling without hiding the surrounding confirmation context.
+
+   These principles also shaped the planned evaluation in Section 5.2.4. The implementation should be checked for contrast, keyboard reachability, logical focus order, error recovery, and narrow-screen behavior. The static prototypes illustrate content hierarchy and status labeling, but they cannot demonstrate complete accessibility of future Vue components, dialogs, or live announcements. Therefore, this document treats WCAG AA as a design target rather than a certified result. Part III testing should combine automated checks with keyboard walkthroughs and assistive-technology inspection of the consequential approval and recovery flows.
 
 ---
 
