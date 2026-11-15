@@ -43,7 +43,7 @@ Since Part I SRS, we have translated our black-box requirements into an implemen
 Translating high-level requirements into concrete interaction and state models exposed three operational gaps that required refining our Part I baseline:
 
 1. **Transactional Remediation with Pre-Mutation Backups and Compensation (Refining `UC-05`)**:
-   Part I assumed approved multi-step remediation plans would either wholly succeed or fail cleanly. In practice, a command failing midway leaves a target Linux host in a partially mutated state. Applying the Compensating Transaction Pattern, every mutating action in `propose_remediation_plan` now requires a pre-mutation backup (`backup_cmd` saving snapshots to `/var/tmp/sysops-backup/<incident_id>`) and a paired `rollback_cmd`. Execution runs sequentially under fail-fast semantics: if step $k$ fails, execution halts, the incident transitions to `Partially_Failed`, and the Web UI exposes per-step status alongside a reviewed reverse rollback workflow that assesses the failed step as well as completed steps.
+   Part I assumed approved multi-step remediation plans would either wholly succeed or fail cleanly. In practice, a command failing midway leaves a target Linux host in a partially mutated state. Applying the Compensating Transaction Pattern, every mutating action in `propose_remediation_plan` now requires a pre-mutation backup (`backup_cmd` saving snapshots to `/var/tmp/sysops-backup/<incident_id>`) and a paired `rollback_cmd`. Execution runs sequentially under fail-fast semantics: if step $k$ fails, execution halts, the incident transitions to `PARTIALLY_FAILED`, and the Web UI exposes per-step status alongside a reviewed reverse rollback workflow that assesses the failed step as well as completed steps.
 2. **Per-Node Concurrency Locking and Incident Coalescing (Refining `UC-03`, `UC-04`, `UC-05`)**:
    Part I lacked mutual exclusion when multiple state drifts occur simultaneously on the same host. We introduced a Per-Node Lease Lock and Coordinator (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`). On a locked node, identical drift signals coalesce into the active incident, while distinct drifts enter a serialized queue (`QUEUED_ON_LOCK`) rather than spawning duplicate LLM loops. An exclusive `REMEDIATING` lock also suspends routine `UC-03` probes on that host until post-remediation verification finishes.
 3. **Deterministic Tool Execution Interceptor (Refining `UC-04`, `UC-09`)**:
@@ -62,7 +62,7 @@ The system adopts a modular monolith and Ports and Adapters architecture organiz
 1. **Web & API Gateway**: Serves the embedded Vue 3 SPA, exposes REST endpoints for node/manifest management, HITL approval (`UC-05`), and memory curation (`UC-08`), and streams real-time diagnostic and step-execution states via Server-Sent Events (SSE).
 2. **State Reconciliation Engine**: Parses declarative YAML manifests (`UC-02`), schedules deterministic SSH probes (`UC-03`), and enforces per-node mutual exclusion via the Node Lease Lock & Incident Coordinator.
 3. **Agent & Memory Orchestrator**: Executes the bounded ReAct diagnostic loop (`UC-04`), interactive chat (`UC-06`), FTS5 memory retrieval, and post-incident memory distillation (`UC-07`), intercepting all agent tool calls via the Tool Execution Interceptor.
-4. **SysOps SSH & Safety Subsystem**: Enforces `UC-09` guardrails via the Command Review Adjudicator (safety classification) and Secret Redaction Middleware (credential scrubbing), and executes probes, backups, repairs, and rollbacks through the Transactional SSH Executor.
+4. **SysOps SSH & Safety Subsystem**: Enforces `UC-09` guardrails via the Command Review Agent (safety classification) and Secret Redaction Middleware (credential scrubbing), and executes probes, backups, repairs, and rollbacks through the Transactional SSH Executor.
 
 ```mermaid
 %%{init: {'flowchart': {'nodeSpacing': 20, 'rankSpacing': 38, 'curve': 'basis'}}}%%
@@ -74,7 +74,7 @@ flowchart LR
         Recon["<b>2. State Reconciliation Engine</b><br/>YAML Scheduler + Per-Node Lease Lock"]
         AgentOrch["<b>3. Agent & Memory Orchestrator</b><br/>ReAct Loop + FTS5 Memory Service"]
         Interceptor["<b>Tool Execution Interceptor</b><br/>Deterministic Permission Gate"]
-        SafetySSH["<b>4. SysOps SSH & Safety</b><br/>Review Adjudicator + SSH Pool + Redactor"]
+        SafetySSH["<b>4. SysOps SSH & Safety</b><br/>Command Review Agent + SSH Pool + Redactor"]
         SQLite[("<b>Embedded SQLite</b><br/>WAL + FTS5 Store")]
     end
 
@@ -180,8 +180,8 @@ flowchart LR
 
 - **Context**: Approved remediation plans (`UC-05`) execute multiple mutating shell commands over SSH. SSH commands are non-transactional: if step $k$ of $N$ fails midway, the target host is left in a partially mutated state with no way to reverse the $k-1$ steps that already succeeded. In parallel, the Diagnostic Agent may emit unsafe or obfuscated commands, and raw SSH outputs may carry credentials that must never reach external LLM providers (`SRS 7.2`, `7.9`).
 - **Options**: (1) Execute approved plans directly and rely on ad-hoc manual cleanup scripts when something breaks; (2) Require LVM/ZFS snapshots or a remote agent daemon on every target node to guarantee whole-transaction rollback; (3) Compensating-transaction execution inside the control plane: every mutating action carries a mandatory `backup_cmd` plus a paired `rollback_cmd`, steps run sequentially under fail-fast semantics, and the whole pipeline is gated by an independent command review agent and a local secret redaction middleware.
-- **Decision**: Adopt Option 3. Each `RemediationAction` in `propose_remediation_plan` now requires a `backup_cmd` (staging file/state snapshots under `/var/tmp/sysops-backup/<incident_id>/` on the target node, verified with `exit_code == 0` before the mutating `command` runs) and a paired `rollback_cmd` restoring that snapshot. Steps execute sequentially; if step $k$ fails, steps $k+1 \dots N$ are skipped, the incident transitions to `Partially_Failed`, and the Web UI exposes per-step statuses (`Succeeded`, `Failed`, `Skipped`) with a one-click reverse rollback ($k-1 \dots 1$) or re-planning. Independently, the deterministic Go Tool Execution Interceptor queries the Command Review Agent strictly as a classifier (`READ_ONLY` / `MUTATING` / `DESTRUCTIVE`) and hard-blocks any `DESTRUCTIVE` verdict, while the Secret Redaction Middleware masks credential patterns in all SSH outputs before they reach the LLM API or SQLite.
-- **Consequences**: Any single-step failure becomes recoverable as long as its pre-mutation backup succeeded; the residual risk shifts to backup/rollback correctness, which the UI surfaces per-step and the design tracks as an open issue in `Section 6`. Each candidate command incurs one extra LLM classification round-trip, mitigated by the fail-closed `mvdan.cc/sh` AST parser that rejects obfuscated syntax before review. Backup artifacts accumulate on target nodes over time, requiring the retention policy to be validated in Part III.
+- **Decision**: Adopt Option 3. Each `RemediationAction` in `propose_remediation_plan` now requires a `backup_cmd` (staging file/state snapshots under `/var/tmp/sysops-backup/<incident_id>/` on the target node, verified with `exit_code == 0` before the mutating `command` runs) and a paired `rollback_cmd` restoring that snapshot. Steps execute sequentially; if step $k$ fails, steps $k+1 \dots N$ are skipped, the incident transitions to `PARTIALLY_FAILED`, and the Web UI exposes per-step statuses (`Succeeded`, `Failed`, `Skipped`) with a reviewed reverse rollback workflow assessing all affected steps (including failed step $k$ when it had partial effects) or re-planning. Independently, the deterministic Go Tool Execution Interceptor queries the Command Review Agent strictly as a classifier (`READ_ONLY` / `MUTATING` / `DESTRUCTIVE`) and hard-blocks any `DESTRUCTIVE` verdict, while the Secret Redaction Middleware masks credential patterns in all SSH outputs before they reach the LLM API or SQLite.
+- **Consequences**: Any single-step failure becomes recoverable as long as its pre-mutation backup succeeded; the residual risk shifts to backup/rollback correctness, which the UI surfaces per-step and the design tracks as an open issue in `Section 6`. Each candidate command incurs one extra LLM classification round-trip, mitigated by the fail-closed `mvdan.cc/sh/v3` AST parser that rejects obfuscated syntax before review. Backup artifacts accumulate on target nodes over time, requiring the retention policy to be validated in Part III.
 
 #### ADR-04: REST Commands and Server-Sent Events for Live Feedback
 
@@ -197,7 +197,7 @@ flowchart LR
 
 - **Decision**: Use versioned JSON REST endpoints for reads and commands and one multiplexed, same-origin SSE connection per active console tab. Stream sanitized diagnostic summaries, reviewed tool outcomes, plan revisions and execution progress. Never stream raw private model reasoning or credentials. REST responses and persisted resource snapshots remain authoritative; SSE does not execute commands.
 - **Rationale**: This fits the embedded Vue/Gin deployment and separates explicit operator intent from background observation. An approval references an immutable plan revision and an idempotency key, so reconnecting or clicking twice cannot create another execution.
-- **Consequences**: Commit each state change and its event record in one SQLite transaction; an ordered durable-log dispatcher publishes by event ID. Resume from `Last-Event-ID`; when history expires, send `stream.reset` and obtain a fresh snapshot. Disable approval while disconnected or refreshing. Heartbeats and disabled proxy buffering are required. A bounded slow-client queue disconnects lagging consumers for replay instead of blocking SSH workers. The persistence contract below is required for the Part III data model.
+- **Consequences**: Commit each state change and its event record in one SQLite transaction; an ordered durable-log dispatcher publishes by event ID. Resume from `Last-Event-ID`; when history expires, send `stream.reset` and obtain a fresh snapshot. Disable approval while disconnected or refreshing. Heartbeats and disabled proxy buffering are required. A bounded slow-client queue disconnects lagging consumers for replay instead of blocking SSH workers. Section 3.2 specifies the corresponding persistence tables (`events`, `idempotency`, `operations`).
 - **Validation**: Interrupt a stream during execution, replay duplicate events, submit approval twice, and approve an obsolete revision. The UI must converge to the persisted snapshot, one execution must be scheduled, and obsolete approval must fail with `409`.
 
 ### 2.5 Quality attributes
@@ -206,8 +206,8 @@ Because this system autonomously executes commands on personal Linux hosts, a si
 
 | Priority | Quality Attribute | Architectural Mechanism | Measurable Target (`SRS §7`) |
 | :-- | :-- | :-- | :-- |
-| **P0** | **Security** | Independent Command Review Agent classifies every candidate command (`UC-09` Part A); the `mvdan.cc/sh` AST parser fails closed on obfuscated syntax; `DESTRUCTIVE` verdicts are hard-blocked unconditionally; SSH keys and LLM API keys are encrypted with AES-256-GCM derived from `master.key`; the Secret Redaction Middleware masks credentials before any LLM call or SQLite write (`UC-09` Part B). | 0% unauthorized state-mutating execution; 100% redaction coverage on standard credential patterns (`SRS 7.2`, `7.9`) |
-| **P1** | **Reliability & Recoverability** | Compensating transactions: per-step `backup_cmd` + `rollback_cmd` with fail-fast execution and the `Partially_Failed` state (CHG-01, `ADR-03`); per-node lease locks with heartbeat TTLs prevent concurrent probes and deadlocked nodes (CHG-02, `ADR-01`); bounded SSH timeouts with exponential backoff isolate unreachable nodes; deterministic drift detection keeps alerting even when the LLM API is down (`SRS 7.5`). | 0% unrecoverable partial mutations; drift detection and alerting uninterrupted under LLM outage |
+| **P0** | **Security** | Independent Command Review Agent classifies every candidate command (`UC-09` Part A); the `mvdan.cc/sh/v3` AST parser fails closed on obfuscated syntax; `DESTRUCTIVE` verdicts are hard-blocked unconditionally; SSH keys and LLM API keys are encrypted with AES-256-GCM derived from `master.key`; the Secret Redaction Middleware masks credentials before any LLM call or SQLite write (`UC-09` Part B). | 0% unauthorized state-mutating execution; 100% redaction coverage on standard credential patterns (`SRS 7.2`, `7.9`) |
+| **P1** | **Reliability & Recoverability** | Compensating transactions: per-step `backup_cmd` + `rollback_cmd` with fail-fast execution and the `PARTIALLY_FAILED` state (CHG-01, `ADR-03`); per-node lease locks with heartbeat TTLs prevent concurrent probes and deadlocked nodes (CHG-02, `ADR-01`); bounded SSH timeouts with exponential backoff isolate unreachable nodes; deterministic drift detection keeps alerting even when the LLM API is down (`SRS 7.5`). | 0% unrecoverable partial mutations; drift detection and alerting uninterrupted under LLM outage |
 | **P2** | **Performance & Resource Efficiency** | Agentless SSH transport leaves zero footprint on target nodes; SQLite WAL + FTS5 is embedded in a single Go binary; deterministic probes run in Go with \$0 LLM cost; context windows are bounded by log `--tail` slices and `search_memory count` limits; SSE streams diagnostics with lightweight one-way connections. | < 300 MB RAM and < 10% idle CPU while monitoring 20 nodes at 60 s intervals; probes < 2 s/node; end-to-end diagnosis < 120 s (`SRS 7.4`, `7.7`) |
 | **P3** | **Maintainability** | Modular monolith with Ports and Adapters: four subsystems interact through narrow interfaces (drift events, tool-call interception, SSH execution); the OpenAI-compatible LLM adapter allows provider switches via configuration only; the deterministic Go interceptor keeps safety-policy logic testable without an LLM in the loop. | Switching LLM providers requires configuration changes only (`SRS 7.3`) |
 
@@ -217,10 +217,10 @@ The dominant trade-off lies in the safety tier: the fail-closed policy will occa
 
 | Risk | Likelihood / Impact | Mitigation |
 | :-- | :-- | :-- |
-| **R1 — LLM latency, outage, or hallucination** | High / Medium | Deterministic `UC-03` probes and alerts never depend on the LLM (`SRS 7.5`); the ReAct loop is bounded by `max_turns` (default 8); hallucinated commands are neutralized by the Command Review Agent; unresolved incidents degrade to `Escalated` with logs instead of blocking the scheduler. |
-| **R2 — SSH execution timeout or midway failure** | Medium / High | Strict per-command timeouts and exponential backoff on unreachable nodes (`SRS 7.5`); pre-mutation `backup_cmd` verified before each step; fail-fast step execution plus paired `rollback_cmd` restore earlier steps via the one-click reverse rollback (CHG-01, `ADR-03`). |
-| **R3 — Verbose logs exhaust the LLM context window** | High / Medium | `exec_readonly_shell` returns bounded slices (`journalctl -n 50`, `docker logs --tail 50`); the Redaction Middleware masks credentials in outputs before transmission; `search_memory` caps retrieved records (`count = 3`); the distillation step compresses transcripts before storage (`UC-07`). |
-| **R4 — Concurrent probes and duplicate LLM loops** | Medium / Medium | Per-node lease lock state machine coalesces identical drift signals and serializes distinct drifts into `Queued_On_Lock` (CHG-02, `ADR-01`); `REMEDIATING` locks suppress routine probe ticks, eliminating false drift alerts while services restart. |
+| **R1 — LLM latency, outage, or hallucination** | High / Medium | Deterministic `UC-03` probes and alerts never depend on the LLM (`SRS 7.5`); the ReAct loop is bounded by `max_turns` (default 8); hallucinated commands are neutralized by the Command Review Agent; unresolved incidents degrade to `ESCALATED` with logs instead of blocking the scheduler. |
+| **R2 — SSH execution timeout or midway failure** | Medium / High | Strict per-command timeouts and exponential backoff on unreachable nodes (`SRS 7.5`); pre-mutation `backup_cmd` verified before each step; fail-fast step execution plus paired `rollback_cmd` restore affected steps via the reviewed reverse rollback (CHG-01, `ADR-03`). |
+| **R3 — Verbose logs exhaust the LLM context window** | High / Medium | `exec_readonly_shell` returns bounded slices (`journalctl -n 50`, `docker logs --tail 50`); the Secret Redaction Middleware masks credentials in outputs before transmission; `search_memory` caps retrieved records (`count = 3`); the distillation step compresses transcripts before storage (`UC-07`). |
+| **R4 — Concurrent probes and duplicate LLM loops** | Medium / Medium | Per-node lease lock state machine coalesces identical drift signals and serializes distinct drifts into `QUEUED_ON_LOCK` (CHG-02, `ADR-01`); `REMEDIATING` locks suppress routine probe ticks, eliminating false drift alerts while services restart. |
 | **R5 — Obfuscated commands bypass the safety review** | Medium / High | The `mvdan.cc/sh/v3` AST parser resolves pipelines, subshells, and redirections before classification, so `eval`/base64 tricks are expanded and fail closed as `MUTATING` or `DESTRUCTIVE` (`UC-09` 1a); the reviewer is a separate model call with no access to the diagnostic context, preventing prompt-injection laundering. |
 | **R6 — Backup or rollback failure during remediation** | Medium / High | Backups are verified (`exit_code == 0`) before the mutating command runs; per-step statuses and rollback results are streamed via SSE; if rollback itself fails, the incident escalates to manual intervention with the exact pre-mutation snapshot path attached; retention and rollback verification are scheduled for Part III PoC validation (`Section 6`). |
 
@@ -276,12 +276,12 @@ flowchart TB
 | :--- | :--- | :--- |
 | `search_memory` | `keywords: string[]`, `scope_context: {node_id, os_family, os_version?, service_name, service_version?}`, `count: int = 3` | Uses scoped, parameterized FTS5 search on `ACTIVE` memory versions; an incompatible OS/service scope is excluded even when keywords match. Results are historical evidence, never executable instructions; cap record text and the *aggregate* prompt budget. |
 | `exec_readonly_shell` | `incident_id`, `node_id`, `command`, `scope_context` | The interceptor first parses the complete command AST, checks a narrow allowlist of diagnostic templates **and argument/path restrictions**, rejects inline secrets locally, then obtains a review verdict only for a safe-to-disclose command. A `READ_ONLY` verdict alone is insufficient: re-check current node lease generation and data-access scope immediately before SSH dispatch, cap output, and apply outbound content policy after local redaction. |
-| `propose_remediation_plan` | `incident_id`, `node_id`, `root_cause`, `actions[]` with `command`, `backup_cmd`, `rollback_cmd` | Persists an immutable proposal for `UC-05`, never executes it. All three commands per step are locally checked for secrets and reviewed before approval/execution; `DESTRUCTIVE` and unknown commands are rejected. The SSH subsystem rechecks approval, plan revision and lease before dispatch. |
+| `propose_remediation_plan` | `incident_id`, `node_id`, `root_cause`, `actions[]` (`description`, `command`, `backup_cmd`, `rollback_cmd`, `risk_level`) | Persists an immutable proposal for `UC-05`, never executes it. All three commands per step are locally checked for secrets and reviewed before approval/execution; `DESTRUCTIVE` and unknown commands are rejected. The SSH subsystem rechecks approval, plan revision and lease before dispatch. |
 | `commit_memory_record` | `incident_id: string`, `symptom_keywords`, `root_cause`, `remediation_steps`, `scope_tags`, `matched_memory_id?: string`, `is_modified: bool` **required** | Internal UC-07 service tool (not an arbitrary LLM SQL write). Verifies `incident_id` is resolved and owns an idempotency receipt; derives/validates an `ACTIVE` matched memory and explicit `is_modified` from the *verified* fix before an atomic three-branch update. For unmatched one-off incidents the candidate may be discarded instead of promoted. The required flag refines the optional field in the Part I tool sketch. |
 
 #### 2.7.3 Short-Term Context and Long-Term Memory Retrieval
 
-For each incident, the orchestrator constructs a **short-term diagnostic context** from the active YAML manifest, observed drift, node and service identifiers, bounded and sanitized diagnostic output, relevant operator feedback, and at most three retrieved memories (`search_memory` default `count = 3`). SQLite FTS5 with BM25 ranking prioritizes exact operational tokens such as service names, exit codes, and log error signatures. Only `Active` memories matching the incident's applicable scope should enter retrieval; `Superseded` and `Archived` versions are excluded from the default search. Retrieved fixes are advisory evidence and must not bypass command review or human approval.
+For each incident, the orchestrator constructs a **short-term diagnostic context** from the active YAML manifest, observed drift, node and service identifiers, bounded and sanitized diagnostic output, relevant operator feedback, and at most three retrieved memories (`search_memory` default `count = 3`). SQLite FTS5 with BM25 ranking prioritizes exact operational tokens such as service names, exit codes, and log error signatures. Only `ACTIVE` memories matching the incident's applicable scope should enter retrieval; `SUPERSEDED` and `ARCHIVED` versions are excluded from the default search. Retrieved fixes are advisory evidence and must not bypass command review or human approval.
 
 The orchestrator retains concise observations and tool outcomes rather than unbounded raw logs. SSH probes use bounded commands (for example, `journalctl -n 50` or `docker logs --tail 50`), and context can be summarized between turns while preserving key error signatures and causal evidence. The local Secret Redaction Middleware removes credentials, tokens, and private keys before diagnostic output is persisted in SQLite, sent to an external LLM endpoint, or streamed to the UI. The web console receives sanitized progress summaries, not private raw model reasoning. An OpenAI-compatible adapter permits local or cloud inference without changing the orchestration logic.
 
@@ -291,15 +291,15 @@ The orchestrator retains concise observations and tool outcomes rather than unbo
 
 When `UC-03` detects drift and the per-node coordinator grants a `DIAGNOSING` lease (`CHG-02`), the orchestrator first searches historical memories and builds the initial context. The Diagnostic Agent then follows a bounded **Reason–Act–Observe** loop: (1) infer a likely cause from available evidence; (2) issue a diagnostic tool call; (3) let the interceptor and safety subsystem vet and execute an eligible read-only probe; and (4) incorporate the redacted observation into the next inference step. The configured default ceiling is `max_turns = 8` (`SRS UC-04`). The orchestrator also applies cancellation to every LLM HTTP request (proposed 30-second per-call deadline) and a 120-second end-to-end diagnosis budget from `SRS 7.7`. On timeout, it cancels the in-flight request, stops renewing the diagnosis lease once it is safe to do so, records a sanitized timeout outcome, and escalates; a hung provider cannot indefinitely hold the node or cause an unbounded retry. If a command is not read-only, the interceptor refuses it and instructs the agent to collect evidence through safe probes or defer the change to the remediation plan.
 
-If sufficient evidence is obtained, the agent submits a structured root-cause summary and ordered remediation actions through `propose_remediation_plan`. The incident transitions to `PENDING_APPROVAL` and waits for explicit operator review (`UC-05`); the Diagnostic Agent never runs the proposed mutations itself. If the turn ceiling is reached or useful diagnosis cannot proceed, the incident is marked `Escalated` with the available sanitized evidence, rather than guessing or automatically repairing the host. If the LLM endpoint is unavailable, deterministic drift detection and alerting continue independently, while agent diagnosis is deferred or escalated (`SRS 7.5`).
+If sufficient evidence is obtained, the agent submits a structured root-cause summary and ordered remediation actions through `propose_remediation_plan`. The incident transitions to `PENDING_APPROVAL` and waits for explicit operator review (`UC-05`); the Diagnostic Agent never runs the proposed mutations itself. If the turn ceiling is reached or useful diagnosis cannot proceed, the incident is marked `ESCALATED` with the available sanitized evidence, rather than guessing or automatically repairing the host. If the LLM endpoint is unavailable, deterministic drift detection and alerting continue independently, while agent diagnosis is deferred or escalated (`SRS 7.5`).
 
 #### 2.7.5 Safety, Human Handoff, and Post-Resolution Memory
 
-The local interceptor provides the enforceable boundary between untrusted model output and privileged tools. A `READ_ONLY` classification constrains mutation risk but **does not authorize reading arbitrary files**: the trusted Go control plane permits only approved, parameter-bounded diagnostics (for example `df`, `free`, `systemctl status <approved-unit>`, `journalctl -u <approved-unit> -n 50 --no-pager` and `docker logs --tail 50 <approved-container>`). General file-reading, arbitrary path arguments, redirections, nested shells, `eval`, and unsupported pipelines fail closed. Both the requested data source and the sanitized output must remain within the node/service scope approved for that incident; redaction is defense in depth, not a substitute for access control. A deterministic local preflight rejects commands containing inline tokens/passwords/private keys before any shell, backup, or rollback command reaches a potentially remote Review Agent. Commands and logs with unrecognized sensitivity must not be sent to external LLM endpoints. Command parsing and review must fail closed on unsupported or obfuscated shell syntax; the Review Agent's result is input to a deterministic policy decision, not permission by itself. The interceptor checks ownership and the monotonically increasing `lease_generation` *again at the SSH dispatch boundary*; an expired or replaced generation cannot start a command. Node takeover stays blocked until any prior remote command has been positively stopped or recovered, rather than relying on TTL expiry alone. `DESTRUCTIVE` commands are hard-blocked and audited. `MUTATING` operations are prohibited during autonomous diagnosis and require a reviewed, versioned plan plus explicit human approval. After approval, the SysOps SSH & Safety subsystem performs the `backup_cmd`, then the change, and finally post-change verification; failures enter the compensating recovery path described in `CHG-01` and the SysOps SSH & Safety team design. The approval and recovery details belong to `UC-05` and the SSH subsystem, rather than the Diagnostic Agent.
+The local interceptor provides the enforceable boundary between untrusted model output and privileged tools. A `READ_ONLY` classification constrains mutation risk but **does not authorize reading arbitrary files**: the trusted Go control plane permits only approved, parameter-bounded diagnostics (for example `df`, `free`, `systemctl status <approved-unit>`, `journalctl -u <approved-unit> -n 50 --no-pager` and `docker logs --tail 50 <approved-container>`). General file-reading, arbitrary path arguments, redirections, nested shells, `eval`, and unsupported pipelines fail closed. Both the requested data source and the sanitized output must remain within the node/service scope approved for that incident; redaction is defense in depth, not a substitute for access control. A deterministic local preflight rejects commands containing inline tokens/passwords/private keys before any shell, backup, or rollback command reaches a potentially remote Review Agent. Commands and logs with unrecognized sensitivity must not be sent to external LLM endpoints. Command parsing and review must fail closed on unsupported or obfuscated shell syntax; the Review Agent's result is input to a deterministic policy decision, not permission by itself. The interceptor checks ownership and the monotonically increasing `lease_generation` *again at the SSH dispatch boundary*; an expired or replaced generation cannot start a command. Node takeover stays blocked until any prior remote command has been positively stopped or recovered, rather than relying on TTL expiry alone. `DESTRUCTIVE` commands are hard-blocked and audited. `MUTATING` operations are prohibited during autonomous diagnosis and require a reviewed, versioned plan plus explicit human approval. After approval, the SysOps SSH & Safety subsystem performs the `backup_cmd`, then the change, and finally post-change verification; failures enter the compensating recovery path described in `CHG-01`, `ADR-03`, and `Section 3.5.2`. The approval and recovery details belong to `UC-05` and the SSH subsystem, rather than the Diagnostic Agent.
 
-Only after the desired-state probe confirms recovery and the incident reaches `Resolved` does `UC-07` begin memory distillation. The system extracts the observed symptoms, confirmed root cause, verified remediation, and any operator modifications, scrubs sensitive content, and invokes `commit_memory_record`. Its three-branch policy stages an unmatched one-off candidate for approval before an active memory is created, increments `hit_count` and refreshes `last_verified_at` for an unchanged successful reuse, or inserts a new version and marks the old entry `Superseded` when the fix was modified. Operators first review unmatched one-off candidates in a non-indexed `PENDING_REVIEW` distillation state: accepting promotes the candidate to `ACTIVE`, while discarding records a `DISCARDED` receipt without making the memory searchable. After promotion, operators may also edit or archive memories (`UC-08`). Selected `matched_memory_id` and environmental scope are persisted with the incident before diagnosis completes. The server compares the canonical verified remediation against the current active matched record (including operator modifications); a mere FTS similarity hit is not automatically considered the same pattern. All new or successor verified records set `last_verified_at` to the incident's actual verification time; manual curation never fabricates verification. This process separates temporary diagnostic context from reusable, provenance-linked long-term knowledge, while ensuring that unverified LLM suggestions are never treated as successful fixes.
+Only after the desired-state probe confirms recovery and the incident reaches `RESOLVED` does `UC-07` begin memory distillation. The system extracts the observed symptoms, confirmed root cause, verified remediation, and any operator modifications, scrubs sensitive content, and invokes `commit_memory_record`. Its three-branch policy stages an unmatched one-off candidate for approval before an active memory is created, increments `hit_count` and refreshes `last_verified_at` for an unchanged successful reuse, or inserts a new version and marks the old entry `SUPERSEDED` when the fix was modified. Operators first review unmatched one-off candidates in a non-indexed `PENDING_REVIEW` distillation state: accepting promotes the candidate to `ACTIVE`, while discarding records a `DISCARDED` receipt without making the memory searchable. After promotion, operators may also edit or archive memories (`UC-08`). Selected `matched_memory_id` and environmental scope are persisted with the incident before diagnosis completes. The server compares the canonical verified remediation against the current active matched record (including operator modifications); a mere FTS similarity hit is not automatically considered the same pattern. All new or successor verified records set `last_verified_at` to the incident's actual verification time; manual curation never fabricates verification. This process separates temporary diagnostic context from reusable, provenance-linked long-term knowledge, while ensuring that unverified LLM suggestions are never treated as successful fixes.
 
-**Design consistency:** This section implements the `UC-04`, `UC-07`, and `UC-09` behaviors in Part I SRS; the `CHG-01` transactional plan, `CHG-02` node lease coordination, and `CHG-03` deterministic interceptor refinements in Part II; and the REST/SSE and versioned memory interfaces proposed in the team's HW2 API design.
+**Design consistency:** This section implements the `UC-04`, `UC-07`, and `UC-09` behaviors in Part I SRS; the `CHG-01` transactional plan, `CHG-02` node lease coordination, and `CHG-03` deterministic interceptor refinements in Part II; and the REST/SSE and versioned memory interfaces specified in Section 3.6.
 
 ---
 
@@ -321,12 +321,14 @@ classDiagram
     class NodeLeaseLockCoordinator {
         -locks: NodeLease[]
         +tryAcquire(nodeID, mode): NodeLease
-        +renew(leaseID): void
-        +release(leaseID): void
+        +renew(nodeID, ownerToken, leaseGeneration): void
+        +release(nodeID, ownerToken, leaseGeneration): void
     }
     class NodeLease {
         +nodeID: string
         +state: IDLE|PROBING|DIAGNOSING|PENDING_APPROVAL|REMEDIATING
+        +leaseGeneration: int
+        +ownerToken: string
         +leaseExpiresAt: Time
     }
     class Node {
@@ -334,13 +336,16 @@ classDiagram
         +host: string
         +port: int
         +username: string
-        +status: NodeStatus
+        +connectionStatus: ConnectionStatus
+        +healthStatus: HealthStatus
+        +version: int
     }
     class DesiredStateManifest {
         +id: string
         +lifecycle: Draft|Active
         +intent: string
         +probeRules: ProbeRule[]
+        +version: int
         +validate(): bool
     }
     class ProbeRule {
@@ -349,9 +354,12 @@ classDiagram
     }
     class Incident {
         +id: string
-        +status: IncidentStatus
+        +status: OPEN|DIAGNOSING|PENDING_APPROVAL|REMEDIATING|PARTIALLY_FAILED|QUEUED_ON_LOCK|RESOLVED|ESCALATED
         +coalescedCount: int
         +observations: Observation[]
+        +matchedMemoryID: string
+        +planRevision: int
+        +version: int
         +rootCauseReport: string
     }
     class Observation {
@@ -360,15 +368,19 @@ classDiagram
         +exitCode: int
     }
     class RemediationPlan {
+        +revisionNumber: int
+        +reviewStatus: Pending|Reviewed|Rejected
         +rootCause: string
         +actions: RemediationAction[]
     }
     class RemediationAction {
+        +stepIndex: int
+        +description: string
         +command: string
         +backupCmd: string
         +rollbackCmd: string
-        +riskLevel: MUTATING|DESTRUCTIVE
-        +stepStatus: Pending|Succeeded|Failed|Skipped
+        +riskLevel: READ_ONLY|MUTATING|DESTRUCTIVE
+        +stepStatus: Pending|Running|Succeeded|Failed|Skipped|Unknown
     }
     class DiagnosticAgent {
         +maxTurns: int
@@ -386,18 +398,25 @@ classDiagram
     class TransactionalSSHExecutor {
         +execReadOnly(nodeID, command): string
         +execPlan(nodeID, plan: RemediationPlan): StepResult[]
-        +rollback(nodeID, incidentID, uptoStep): StepResult[]
+        +rollback(nodeID, incidentID, affectedSteps): StepResult[]
     }
     class MemoryService {
-        +search(keywords: string[], count: int): MemoryRecord[]
-        +commit(record: MemoryRecord): void
+        +search(keywords: string[], scopeContext: ScopeContext, count: int): MemoryRecord[]
+        +commit(incidentID: string, record: MemoryRecord, matchedMemoryID?: string, isModified: bool): void
     }
     class MemoryRecord {
+        +lineageID: string
+        +revisionNumber: int
+        +supersedesID: string
+        +sourceIncidentID: string
         +symptomKeywords: string[]
         +rootCause: string
         +remediationSteps: string[]
+        +scopeTags: string[]
+        +status: ACTIVE|SUPERSEDED|ARCHIVED
         +hitCount: int
-        +version: Active|Superseded
+        +lastVerifiedAt: Time
+        +version: int
     }
 
     ProbeScheduler --> NodeLeaseLockCoordinator : acquires/releases leases
@@ -553,7 +572,7 @@ erDiagram
 | `manifests` + `manifest_revisions` | `manifests.node_id` FK; active revision pointer; immutable `(manifest_id, revision_number)` unique key; YAML and validation state in revisions | Versioned declarative policies. A running incident stays bound to the revision observed when drift occurred, even when a policy is edited later. |
 | `incidents` | `id` PK; `node_id`, `manifest_revision_id` FKs; `status`, `drift_signature`, `drift_summary`, `coalesced_count`, `root_cause_summary`, `matched_memory_id`, `matched_memory_version`, `plan_revision`, `version`, `resolved_at` | Traces a fault from `OPEN`/`DIAGNOSING` to `PENDING_APPROVAL`, `RESOLVED`, or `ESCALATED`, including `QUEUED_ON_LOCK` and `PARTIALLY_FAILED`. |
 | `diagnostic_observations` | `id` PK; `incident_id` FK; `turn_index`, `tool_name`, `review_verdict`, sanitized command/observation, `created_at` | Bounded, redacted evidence for the ReAct trace; no raw secrets or private model reasoning are stored (`UC-04/09`). |
-| `remediation_plans` + `remediation_actions` | `(incident_id, revision_number)` unique; ordered `(plan_id, step_index)` unique; each action has `command`, mandatory `backup_cmd` and `rollback_cmd`, risk and review metadata | Immutable reviewed plan revisions. A plan edit creates a new revision; previously approved steps cannot silently change (`CHG-01` and the team's SSH & Safety design). |
+| `remediation_plans` + `remediation_actions` | `(incident_id, revision_number)` unique; ordered `(plan_id, step_index)` unique; each action has `command`, mandatory `backup_cmd` and `rollback_cmd`, risk and review metadata | Immutable reviewed plan revisions. A plan edit creates a new revision; previously approved steps cannot silently change (`CHG-01`, `ADR-03`, and Section 3.5.2). |
 | `operations` + `action_runs` | `operations` records operation/worker/lease generation; `action_runs` records backup, command and compensation states for a specific approved action | Tracks execution and recovery outcomes without mutating the reviewed command definitions. Timeout/uncertain status is explicit. |
 | `memories` | `id` PK; `lineage_id`, `revision_number`, `supersedes_id` FK; `source_incident_id` FK; `symptom_keywords`, `root_cause`, `remediation_steps`, `scope_tags`, `status`, `hit_count`, `last_verified_at`, `version` | Reusable, verified, redacted knowledge with provenance, optimistic concurrency, and audit-preserving version lineage (`UC-07/08`). |
 | `events` | Autoincrement `id`; `resource_type`, `resource_id`, `resource_version`, `type`, sanitized JSON `payload`, `committed_at` | Durable SSE outbox. Keep up to **24 hours or 100,000 entries**, whichever threshold is reached first; reclaim old rows in short background batches. Expired replay cursors cause `stream.reset` and a fresh consistent `/sync` snapshot (per the proposed Web/API contract). |
@@ -565,7 +584,7 @@ Indexes target the most common operations: `incidents(node_id, status, updated_a
 
 The `memories_fts` virtual table indexes four searchable fields in `memories`: `symptom_keywords`, `root_cause`, `remediation_steps`, and `scope_tags`. An **external-content** FTS5 index keyed by the `memories` rowid and synchronized through insert/update/delete triggers avoids a second independent source of truth. The Memory Service normalizes diagnostic terms, constructs a safely escaped FTS query, and uses bound parameters to prevent user-provided text from being interpreted as arbitrary SQL or untrusted FTS query syntax. `scope_context` is obtained from trusted current node/manifest metadata (`node_id`, OS distribution/version, service identity/version); incompatible records are excluded before any result is injected into the LLM. Each memory field has an enforced storage length limit; retrieved content is truncated/summarized to a total memory budget (proposed 4,000 tokens), not merely bounded by record count. It joins ranked FTS matches back to `memories`, filters `status = 'ACTIVE'` and applicable scope, and uses `bm25(...)` ranking with a configurable top-`k` limit (default `search_memory.count = 3` in Part I SRS).
 
-For example, a future incident involving `nginx.service` and an address-in-use error can recover a prior verified memory containing those tokens; it does **not** automatically execute its stored remediation steps. Keyword retrieval is lightweight and particularly useful for exact SysOps identifiers, but it can miss semantically similar incidents with different wording. This limitation is a known trade-off of `ADR-02`, not a claim of semantic-equivalent search. `Superseded` and `Archived` records remain available for audit but are excluded from normal retrieval.
+For example, a future incident involving `nginx.service` and an address-in-use error can recover a prior verified memory containing those tokens; it does **not** automatically execute its stored remediation steps. Keyword retrieval is lightweight and particularly useful for exact SysOps identifiers, but it can miss semantically similar incidents with different wording. This limitation is a known trade-off of `ADR-02`, not a claim of semantic-equivalent search. `SUPERSEDED` and `ARCHIVED` records remain available for audit but are excluded from normal retrieval.
 
 #### 3.2.5 Adaptive Memory Evolution (`UC-07`)
 
@@ -585,7 +604,7 @@ The schema implements `CHG-01` by storing pre-mutation backups, compensation com
 
 For the proposed team REST/SSE design, resource changes and their corresponding outbox events are committed atomically; the REST/SSE gateway can replay events by increasing event `id` after reconnection. Events are retained for up to 24 hours or 100,000 rows; a replay request older than retained history receives `stream.reset` and must fetch a fresh `/sync` snapshot. The UI's `GET /memories`, `GET /memories/{id}`, `PATCH /memories/{id}` and archive action map to `memories` and `memories_fts`, while node and incident DTO versions map to their corresponding `version` fields. A plan approval is bound to the current incident/plan revision and an idempotency key. This design keeps the Agent & Memory subsystem's persistence consistent with the separate SysOps SSH & Safety and Web/API designs without treating model output as an authoritative database mutation.
 
-**Implementation note:** The ER diagram and table/index definitions above are the proposed HW2 design artifact. A separate executable SQL schema may be developed for Part III, but no companion `.sql` file is included with this PR. For Part III the new work-queue and review-state columns must also be reflected in the executable migration and tested against SQLite foreign-key/FTS5 behavior.
+**Implementation note:** The ER diagram and table/index definitions above are the proposed HW2 design artifact. A separate executable SQL schema will be developed for Part III. For Part III, the new work-queue and review-state columns must also be reflected in the executable migration and tested against SQLite foreign-key/FTS5 behavior.
 
 ### 3.3 Agent & Memory Diagrams
 
@@ -596,15 +615,15 @@ This section specifies the interaction order for the Agent & Memory Orchestrator
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Node Lease Coordinator
+    participant C as NodeLeaseLockCoordinator
     participant O as Agent Orchestrator
-    participant M as Memory Service
+    participant M as MemoryService
     participant DB as SQLite
-    participant D as Diagnostic Agent / LLM
-    participant I as Go Tool Interceptor
-    participant R as Command Review Agent
-    participant E as SSH Executor
-    participant S as Local Redaction & Output Scope Guard
+    participant D as DiagnosticAgent / LLM
+    participant I as ToolExecutionInterceptor
+    participant R as CommandReviewAgent
+    participant E as TransactionalSSHExecutor
+    participant S as SecretRedactionMiddleware & Scope Guard
     participant UI as Gin API / Web UI
 
     Note over C,O: UC-03 detects drift, coordinator owns DIAGNOSING generation
@@ -623,7 +642,7 @@ sequenceDiagram
             O->>DB: Record timeout and ESCALATED status
             O->>C: Stop diagnosis lease renewal and start safe-release protocol
         else LLM responds
-            D-->>O: Tool call exec_readonly_shell(incident_id,node_id,command,scope)
+            D-->>O: Tool call exec_readonly_shell(incident_id, node_id, command, scope_context)
             O->>I: Intercept tool call with current lease generation
             I->>I: Parse AST, allowlist command/args/path, reject inline secrets
             alt Unsupported scope, inline secret or unsafe syntax
@@ -654,7 +673,7 @@ sequenceDiagram
     end
 
     alt Sufficient evidence and within time/turn limits
-        D-->>O: propose_remediation_plan(incident_id,root_cause,actions)
+        D-->>O: propose_remediation_plan(incident_id, node_id, root_cause, actions)
         O->>I: Submit immutable proposal
         I->>I: Verify command/backup_cmd/rollback_cmd, reject inline secrets
         I->>R: Classify locally validated credential-free commands
@@ -675,18 +694,18 @@ sequenceDiagram
 
 The deterministic interceptor validates the *whole* shell command against a narrow diagnostic allowlist and its path/argument scope, rejects embedded credentials before sending anything to a potentially external Review Agent, and consults that reviewer only as a classifier. The reviewer does not execute commands. Even a `READ_ONLY` verdict cannot authorize arbitrary file reads; the SSH dispatcher checks the current node lease owner/generation immediately before dispatch. The previous lease owner must have no unknown remote execution before another generation takes over. SSH output is redacted and checked for allowed data scope *before* entering prompts, storage or SSE; sensitive or unbounded results are withheld.
 
-A valid diagnosis yields an immutable, versioned proposal with reviewed `command`, `backup_cmd`, and `rollback_cmd`. It enters `PENDING_APPROVAL`, not automatic execution. Uncertain, invalid, unsafe or timed-out diagnosis escalates with sanitized evidence. The actual remediation and rollback remain under the human-approved UC-05 execution subsystem, consistent with `CHG-01` to `CHG-03` and the pending team SSH design.
+A valid diagnosis yields an immutable, versioned proposal with reviewed `command`, `backup_cmd`, and `rollback_cmd`. It enters `PENDING_APPROVAL`, not automatic execution. Uncertain, invalid, unsafe or timed-out diagnosis escalates with sanitized evidence. The actual remediation and rollback remain under the human-approved UC-05 execution subsystem, consistent with `CHG-01` to `CHG-03`, `Section 3.5`, and `Section 3.6`.
 
 #### 3.3.2 Sequence 2: Verified Incident Distillation and Three-Branch Memory Evolution (`UC-07`)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Incident Coordinator / UC-05
+    participant C as NodeLeaseLockCoordinator / UC-05
     participant O as Agent & Memory Orchestrator
-    participant S as Local Secret Redaction
+    participant S as SecretRedactionMiddleware
     participant L as LLM Distiller
-    participant M as Memory Service
+    participant M as MemoryService
     participant DB as SQLite + FTS5
     participant G as Gin API / SSE Dispatcher
     actor U as Operator / Memory Hub
@@ -752,7 +771,7 @@ sequenceDiagram
 
 #### 3.4.1 Per-Node Lease Lock State Machine
 
-The `NodeLeaseLockCoordinator` enforces a single lock per target node with heartbeat-renewed TTLs (ADR-01). Lock acquisition failures route drift signals into coalescing or `Queued_On_Lock` rather than spawning duplicate loops:
+The `NodeLeaseLockCoordinator` enforces a single lock per target node with heartbeat-renewed TTLs (ADR-01). Lock acquisition failures route drift signals into coalescing or `QUEUED_ON_LOCK` rather than spawning duplicate loops:
 
 ```mermaid
 stateDiagram-v2
@@ -765,41 +784,41 @@ stateDiagram-v2
     PENDING_APPROVAL --> DIAGNOSING : operator rejects with feedback
     PENDING_APPROVAL --> REMEDIATING : operator approves / edits plan
     REMEDIATING --> PROBING : post-repair verification probe
-    PROBING --> IDLE : verification passes (Resolved)
-    DIAGNOSING --> IDLE : max_turns reached (Escalated)
+    PROBING --> IDLE : verification passes (RESOLVED)
+    DIAGNOSING --> IDLE : max_turns reached (ESCALATED)
 
     note right of PROBING
         Identical drift on a locked node
         coalesces into the active incident
         (coalesced_count++); distinct drift
-        enters Queued_On_Lock and re-probes
+        enters QUEUED_ON_LOCK and re-probes
         on lock release.
     end note
 ```
 
 #### 3.4.2 Incident Lifecycle State Machine
 
-The incident aggregate transitions through diagnosis, the HITL approval gate, and transactional remediation, including the `Partially_Failed` recovery path introduced by CHG-01:
+The incident aggregate transitions through diagnosis, the HITL approval gate, and transactional remediation, including the `PARTIALLY_FAILED` recovery path introduced by CHG-01:
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> Open : UC-03 drift detected
-    Open --> Diagnosing : UC-04 ReAct loop starts
-    Diagnosing --> Pending_Approval : remediation plan proposed
-    Pending_Approval --> Diagnosing : plan rejected with feedback
-    Pending_Approval --> Remediating : plan approved (REMEDIATING lock)
-    Remediating --> Resolved : re-probe converges (UC-03)
-    Remediating --> Partially_Failed : step k fails (fail-fast, k+1..N skipped)
-    Partially_Failed --> Diagnosing : reverse rollback (k-1..1) completes -> follow-up diagnosis
-    Partially_Failed --> Pending_Approval : operator edits & re-submits plan
-    Diagnosing --> Escalated : max_turns reached
-    Escalated --> Resolved : operator resolves manually
-    Open --> Queued_On_Lock : distinct drift while node locked
-    Queued_On_Lock --> Diagnosing : lock released & re-probe confirms drift
-    Queued_On_Lock --> [*] : re-probe converges (auto-close)
-    Resolved --> [*] : triggers UC-07 memory distillation
-    Escalated --> [*]
+    [*] --> OPEN : UC-03 drift detected
+    OPEN --> DIAGNOSING : UC-04 ReAct loop starts
+    DIAGNOSING --> PENDING_APPROVAL : remediation plan proposed
+    PENDING_APPROVAL --> DIAGNOSING : plan rejected with feedback
+    PENDING_APPROVAL --> REMEDIATING : plan approved (REMEDIATING lock)
+    REMEDIATING --> RESOLVED : re-probe converges (UC-03)
+    REMEDIATING --> PARTIALLY_FAILED : step k fails (fail-fast, k+1..N skipped)
+    PARTIALLY_FAILED --> DIAGNOSING : assessed rollback completes -> follow-up diagnosis
+    PARTIALLY_FAILED --> PENDING_APPROVAL : operator edits & re-submits plan (re-reviewed)
+    DIAGNOSING --> ESCALATED : max_turns reached
+    ESCALATED --> RESOLVED : operator reports fix & UC-03 probe converges
+    OPEN --> QUEUED_ON_LOCK : distinct drift while node locked
+    QUEUED_ON_LOCK --> DIAGNOSING : lock released & re-probe confirms drift
+    QUEUED_ON_LOCK --> [*] : re-probe converges (auto-close)
+    RESOLVED --> [*] : triggers UC-07 memory distillation
+    ESCALATED --> [*]
 ```
 
 ### 3.5 Drift & Remediation Diagrams
@@ -824,7 +843,7 @@ sequenceDiagram
             C->>DB: incident.coalesced_count++
         else node locked by distinct drift
             C-->>S: lock denied
-            S->>DB: create incident = Queued_On_Lock
+            S->>DB: create incident = QUEUED_ON_LOCK
         else lock acquired (TTL + heartbeat)
             C-->>S: lease granted
             S->>E: execReadOnly(probe commands)
@@ -835,9 +854,9 @@ sequenceDiagram
             S->>S: compare actual state vs manifest
             alt state converged
                 S->>C: release lease
-                S->>DB: node.status = Healthy
+                S->>DB: node.health_status = Healthy
             else drift detected
-                S->>DB: create incident = Open (+ drift alert)
+                S->>DB: create incident = OPEN (+ drift alert)
                 S->>C: upgrade lease to DIAGNOSING
                 S-->>AO: drift event (DIAGNOSING) -> dispatch UC-04 loop
             end
@@ -857,7 +876,7 @@ sequenceDiagram
     participant N as Target Linux Node
     participant DB as SQLite
 
-    API-->>O: SSE: incident = Pending_Approval (root cause + plan)
+    API-->>O: SSE: incident = PENDING_APPROVAL (root cause + plan)
     O->>API: review plan (approve / edit / reject)
     note over O, API: on reject the plan returns to UC-04 diagnosis - shown path is approval
     API->>C: acquire exclusive REMEDIATING lock
@@ -868,6 +887,8 @@ sequenceDiagram
         N-->>E: exit_code
         alt backup failed
             E-->>API: abort before mutation
+            API->>DB: incident = PARTIALLY_FAILED
+            API->>C: transition lease (IDLE / DIAGNOSING)
         else backup verified (exit_code == 0)
             E->>N: command_k (mutating)
             N-->>E: output (scrubbed)
@@ -875,11 +896,11 @@ sequenceDiagram
                 E-->>API: Succeeded (k)
             else step k failed (fail-fast)
                 E-->>API: Failed (k), skip k+1..N
-                API->>DB: incident = Partially_Failed
-                API-->>O: SSE: per-step status + Auto-Rollback button
-                opt operator triggers reverse rollback
-                    O->>API: rollback(k-1 .. 1)
-                    loop j = k-1 down to 1
+                API->>DB: incident = PARTIALLY_FAILED
+                API-->>O: SSE: per-step status + Rollback confirmation
+                opt operator confirms assessed rollback scope
+                    O->>API: rollback(affected steps in reverse order)
+                    loop j in affected steps (k down to 1)
                         API->>E: rollback_cmd(j)
                         E->>N: restore snapshot j
                     end
@@ -891,16 +912,17 @@ sequenceDiagram
     E->>N: SSH probe
     N-->>E: state snapshot
     alt state converged
-        API->>DB: incident = Resolved (trigger UC-07)
+        API->>DB: incident = RESOLVED (trigger UC-07)
         API->>C: release lease
     else drift persists
         API->>DB: keep incident open for re-planning
+        API->>C: transition lease (DIAGNOSING / IDLE)
     end
 ```
 
 ### 3.6 API Interfaces
 
-**Owner: Ma Xiaoyun (2352626).** The following is the proposed implementation contract between the Vue 3 console and the Gin gateway. Paths are relative to `/api/v1`. Identifiers are opaque strings; timestamps use UTC RFC 3339. DTOs expose domain resources rather than SQLite rows. State names below follow the conceptual states in Sections 1 and 4; other diagram owners should use the same vocabulary when integrating their sections.
+**Owner: Ma Xiaoyun (2352626).** The following is the proposed implementation contract between the Vue 3 console and the Gin gateway. Paths are relative to `/api/v1`. Identifiers are opaque strings; timestamps use UTC RFC 3339. DTOs expose domain resources rather than SQLite rows. State names follow the canonical vocabulary established in Sections 1, 3.2, 3.4, and 4.
 
 #### 3.6.1 Shared conventions and trust boundary
 
@@ -933,11 +955,11 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `GET /settings` | None | `200` settings + ETag/version, redacted endpoint/model, key_configured and autonomy limits; API key is never returned |
 | `PUT /settings/llm` | `endpoint, model, api_key?`; If-Match | `200` updated settings + ETag; omitted key preserves the existing key; empty key is rejected; validate before commit, and preserve old settings on failure |
-| `PUT /settings/autonomy` | `max_steps, allowed_risk_levels, approval_required`; If-Match | `200` updated settings + ETag; max_steps is an integer in 1..100; approval_required must be true; allowed_risk_levels is a subset of READ_ONLY and MUTATING; DESTRUCTIVE is always blocked |
+| `PUT /settings/autonomy` | `max_turns, allowed_risk_levels, approval_required`; If-Match | `200` updated settings + ETag; max_turns is an integer in 1..100 (default 8); approval_required must be true; allowed_risk_levels is a subset of READ_ONLY and MUTATING; DESTRUCTIVE is always blocked |
 
-**Required persistence and recovery contract (Section 3.2 integration)**
+**Required persistence and recovery contract (Section 3.2 alignment)**
 
-- `events(id INTEGER PRIMARY KEY AUTOINCREMENT, resource_id, resource_version, type, payload, committed_at)`: insert with each state transition in the same SQLite transaction. Retain 24 hours or 100,000 rows; a cursor older than retained history triggers reset. Only the ordered log reader publishes; heartbeats have no ID.
+- `events(id INTEGER PRIMARY KEY AUTOINCREMENT, resource_type, resource_id, resource_version, type, payload, committed_at)`: insert with each state transition in the same SQLite transaction. Retain 24 hours or 100,000 rows; a cursor older than retained history triggers reset. Only the ordered log reader publishes; heartbeats have no ID.
 - `idempotency(operator_id, key, route, request_hash, http_status, response, resource_id, operation_id, created_at)`: UNIQUE(operator_id, key). Acceptance, resource/operation creation, response receipt and event insertion share one transaction. Keep receipts for the deployment lifetime, including deleted resources; never silently reuse expired keys. `GET /idempotency/{key}` authenticates the owner and returns the original receipt, or 404. Duplicate concurrent requests serialize on the unique key; mismatched route/hash returns 409. A replayed receipt is returned before evaluating a now-stale precondition.
 - `operations` additionally persists `worker_id, claim_expires_at, lease_generation, remote_step_id`. Claim with one conditional transaction checking Queued status AND the current unexpired node owner/generation. Stale queued operations fail with `LEASE_LOST`; never rebind them silently. Renew claims conditionally on owner and generation.
 - At startup and on claim timeout, atomically move orphaned Running operations to Unknown and quarantine their host. A recovery worker moves Unknown to Reconciling, inspects remote step evidence and desired state, then records Succeeded or Failed with evidence; unresolved work returns to Unknown for manual intervention. Never blindly replay a possibly executed command.
@@ -987,10 +1009,10 @@ YAML validation uses a safe schema parser, rejects unknown resource types and du
 | `POST /incidents/{id}/approvals` | `plan_revision, decision` (`approve` or `reject`), `feedback`; idempotency key | `202` accepted execution or re-planning operation; rejection requires nonempty feedback. Approval is allowed only for the current reviewed plan in `PENDING_APPROVAL` |
 | `POST /incidents/{id}/rollbacks` | `execution_id, plan_revision, reason`; idempotency key | `202` compensation operation; only after execution stops and backup/step outcomes are assessed; stale state or no eligible recovery returns `409` |
 | `POST /incidents/{id}/replans` | `feedback`; idempotency key | `202` diagnosis operation after rejection or a settled failure; cannot overlap execution or recovery |
-| `POST /incidents/{id}/resolutions` | `resolution_note`; idempotency key | `202` verification of a reported manual repair; only a successful desired-state probe marks it `Resolved` |
+| `POST /incidents/{id}/resolutions` | `resolution_note`; idempotency key | `202` verification of a reported manual repair; only a successful desired-state probe marks it `RESOLVED` |
 | `GET /operations/{id}` | None | `200` command result; supports recovery after a lost HTTP response |
 
-The server atomically checks session, plan revision, review verdict, incident state and node lease before scheduling execution, binding each accepted operation to that lease generation. Workers claim through an atomic conditional `Queued -> Running` transition that writes an exclusive worker ID; if no row changes, no work starts. Recheck owner and generation before every remote mutation. On lease expiry or release, revoke further dispatch and confirm remote commands and descendants have stopped before another owner may mutate; closing the transport alone is insufficient. If termination/outcome is uncertain, quarantine the host, mark effects `Unknown` and reconcile before granting a new mutating lease. `DESTRUCTIVE` commands remain blocked even when an operator clicks Approve. A browser disconnect does not cancel accepted work. Backups must succeed before their associated mutation starts; failures stop subsequent steps. A failed SSH command can have partially changed state: the executor assesses the failed step as well as completed steps before selecting compensation. Unknown effects are shown as `Unknown` and may require manual escalation. Rollback is a separate explicit action, uses reviewed compensation in reverse dependency order, and does not imply desired-state convergence. `Resolved` requires a fresh probe.
+The server atomically checks session, plan revision, review verdict, incident state and node lease before scheduling execution, binding each accepted operation to that lease generation. Workers claim through an atomic conditional `Queued -> Running` transition that writes an exclusive worker ID; if no row changes, no work starts. Recheck owner and generation before every remote mutation. On lease expiry or release, revoke further dispatch and confirm remote commands and descendants have stopped before another owner may mutate; closing the transport alone is insufficient. If termination/outcome is uncertain, quarantine the host, mark effects `Unknown` and reconcile before granting a new mutating lease. `DESTRUCTIVE` commands remain blocked even when an operator clicks Approve. A browser disconnect does not cancel accepted work. Backups must succeed before their associated mutation starts; failures stop subsequent steps. A failed SSH command can have partially changed state: the executor assesses the failed step as well as completed steps before selecting compensation. Unknown effects are shown as `Unknown` and may require manual escalation. Rollback is a separate explicit action, uses reviewed compensation in reverse dependency order, and does not imply desired-state convergence. `RESOLVED` requires a fresh probe.
 
 An accepted execution pins an immutable reviewed plan revision, action payload, node connection version and active manifest revision. Block plan edits, connection changes and policy activation while execution is queued, running or uncertain (409); workers execute the pinned payload, never a mutable current plan. A plan review result is accepted only if its revision/hash still matches. Approval atomically changes the incident out of PENDING_APPROVAL, so different idempotency keys cannot approve the same revision twice. Rollback acceptance likewise permits only one active compensation operation per execution.
 
@@ -1094,7 +1116,7 @@ sequenceDiagram
 ## 4. Updated Requirements
 
 1. **CHG-01 — Transactional Remediation & Rollback (`SRS 5.2.3 UC-05` & `5.4 propose_remediation_plan`)**
-    - **Change**: Replaced atomic batch execution with sequential fail-fast execution backed by mandatory pre-mutation snapshots (`backup_cmd` saving state to `/var/tmp/sysops-backup/<incident_id>/`, verified with `exit_code == 0` before running `command`) and paired compensation commands (`rollback_cmd`). If step $k$ fails, remaining steps $k+1..N$ are skipped, the incident enters `Partially_Failed`, and the Web UI exposes per-step statuses (`Succeeded`, `Failed`, `Skipped`) with explicitly reviewed rollback of all affected steps, including failed step $k$ when it had partial effects, in reverse dependency order, or re-planning.
+    - **Change**: Replaced atomic batch execution with sequential fail-fast execution backed by mandatory pre-mutation snapshots (`backup_cmd` saving state to `/var/tmp/sysops-backup/<incident_id>/`, verified with `exit_code == 0` before running `command`) and paired compensation commands (`rollback_cmd`). If step $k$ fails, remaining steps $k+1..N$ are skipped, the incident enters `PARTIALLY_FAILED`, and the Web UI exposes per-step statuses (`Succeeded`, `Failed`, `Skipped`) with explicitly reviewed rollback of all affected steps, including failed step $k$ when it had partial effects, in reverse dependency order, or re-planning.
     - **Rationale**: Multi-step SSH mutations are non-atomic; midway failure leaves target nodes in an inconsistent state without pre-change backups and compensation logic.
 2. **CHG-02 — Per-Node Concurrency Locking & Coalescing (`SRS 5.1 UC-03`, `5.2.2 UC-04` & `5.2.3 UC-05`)**
     - **Change**: Introduced a per-node lease lock (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`) in SQLite. On drift detection, if a node is locked by the same drift signature, `coalesced_count` increments without spawning a second LLM loop; if locked by a distinct drift signature, the new incident enters `QUEUED_ON_LOCK` and re-probes the node upon lock release. Active `REMEDIATING` locks suppress routine `UC-03` probe ticks.
@@ -1153,11 +1175,15 @@ Search supports keyword and scope filters and shows Active records by default. D
 
 @import "./mockups/screen4_memory.html"
 
-[Open the settings prototype](./mockups/screen5_settings.html). The additional settings screen collects the model endpoint, model name, write-only replacement key and autonomy bounds, with first-run login guidance. It shares the Chinese UI language and navigation of the four original prototypes.
+#### 5.1.5 LLM and autonomy settings
+
+[Open the settings prototype](./mockups/screen5_settings.html).
+
+The settings screen collects the model endpoint, model name, write-only replacement API key, and autonomy bounds (`max_turns` and allowed risk levels, with `DESTRUCTIVE` permanently blocked), paired with first-run loopback bootstrap and login guidance. It shares the Chinese UI language and navigation of the four original prototypes.
 
 @import "./mockups/screen5_settings.html"
 
-#### 5.1.5 Interaction, accessibility and frontend state
+#### 5.1.6 Interaction, accessibility and frontend state
 
 - **Feedback and recovery**: Pending requests show progress and disable duplicate submissions. Server validation errors appear next to fields and in a focusable summary; a `request_id` is available for troubleshooting. A `409`/`412` preserves local edits for comparison but requires reload and review before resubmission.
 - **Accessibility**: Status badges use text as well as color. Inputs have visible labels; dialogs trap focus and restore it on close; keyboard focus remains visible. Summarized progress uses a polite live region rather than announcing every streamed fragment. Color contrast targets WCAG 2.2 AA (4.5:1 for normal text), subject to Part III verification.
@@ -1206,7 +1232,7 @@ flowchart TD
     H --> I{Execution result}
     I -- All succeeded --> J[Probe desired state]
     J --> K{Converged?}
-    K -- Yes --> L[Resolved and distill memory]
+    K -- Yes --> L[RESOLVED and distill memory]
     K -- No --> E
     I -- Backup or action failure --> M[Stop and show per-step effects]
     I -- Unknown effects --> N[Reconcile or escalate for manual recovery]
@@ -1263,11 +1289,11 @@ These are planned checks, not completed user-study or production-test results.
 
 2. **Backup Artifact Lifecycle & Rollback Trustworthiness**:
     - Uncertainty: Pre-mutation snapshots accumulate under `/var/tmp/sysops-backup/<incident_id>/` with no retention policy, and a `rollback_cmd` that itself fails midway (e.g., a partial config restore) can leave the host in a hybrid state worse than the original failure. We also have no automated check that a rollback actually restored the exact pre-mutation state.
-    - Part III PoC Validation: Run a fault-injection test that kills the SSH session mid-step, then measure post-rollback convergence via the standard `UC-03` probe; define a backup retention/TTL policy (e.g., prune snapshots on `Resolved` or after N days); treat failed rollback verification as `Escalated` requiring manual intervention.
+    - Part III PoC Validation: Run a fault-injection test that kills the SSH session mid-step, then measure post-rollback convergence via the standard `UC-03` probe; define a backup retention/TTL policy (e.g., prune snapshots on `RESOLVED` or after N days); treat failed rollback verification as `ESCALATED` requiring manual intervention.
 
 3. **Stale Approval and SSE Replay Consistency (Ma Xiaoyun)**:
     - Uncertainty: Browser reconnection, multiple tabs, proxy buffering and bounded replay retention can leave a visible plan behind the server state. Native EventSource reconnection alone does not guarantee consistent UI state or exactly-once execution.
-    - Proposed mitigation: Durable state/event transactions, snapshot cursors, resource versions, revision-bound approval and persisted idempotency keys (ADR-04, Section 3.6). State and event history retention must be agreed with the database owner.
+    - Proposed mitigation: Durable state/event transactions, snapshot cursors, resource versions, revision-bound approval and persisted idempotency keys (ADR-04, Section 3.6). Both Section 3.2 and Section 3.6 specify a 24-hour / 100,000-row retention window for the `events` outbox, while background batch pruning and cursor-reset behavior remain to be validated under load.
     - Part III validation: Disconnect for both shorter and longer than the replay window; duplicate events; restart Gin; submit approval from two tabs; lose the approval HTTP response. Pass if state converges after recovery, obsolete approval is rejected, and each accepted command starts at most one execution. A crash during remote mutation must surface an unknown outcome rather than blindly re-executing it.
 
 4. **Recovery Scope and Operator Comprehension (Ma Xiaoyun)**:
@@ -1310,8 +1336,8 @@ These are planned checks, not completed user-study or production-test results.
 - **Benefits**: AI helped translate the task allocation and HW1 requirements into a consistent REST/SSE proposal, enumerate exceptional UI states and produce reusable screen artifacts.
 - **Limitations**: Generated contracts can introduce unimplemented assumptions, including session authentication, durable event retention and revision-based concurrency. They require agreement with the backend, database and execution owners. HTML prototypes demonstrate layout and navigation rather than a working Vue/Gin system.
 - **Verification in this session**: The draft was compared with the task allocation, existing design and HW1 requirements. Static checks cover prototype references and section completeness; the PoC, fault-injection and usability checks listed in Section 5.2.4 remain future work. 
-- **Design corrections**: Approval is tied to a reviewed revision; edited commands are re-reviewed; SSE reconnect does not resubmit mutations; compensation is distinguished from desired-state resolution; diagnostic output uses sanitized summaries .
-- **Artifacts**: ADR-04; Section 3.6; Section 5; the four HTML prototypes in `hw2/mockups`; personal open issues and annotated references. .
+- **Design corrections**: Approval is tied to a reviewed revision; edited commands are re-reviewed; SSE reconnect does not resubmit mutations; compensation is distinguished from desired-state resolution; diagnostic output uses sanitized summaries.
+- **Artifacts**: ADR-04; Section 3.6; Section 5; the five HTML prototypes in `hw2/mockups`; personal open issues and annotated references.
 
 ### lcr
 
@@ -1319,7 +1345,7 @@ These are planned checks, not completed user-study or production-test results.
 - Cost: covered by Google AI Pro & OpenCode Go subscription
 - Pros / cons: efficient at turning SRS scenarios (`UC-03`, `UC-05`, `UC-09`) into mermaid sequence/state diagrams and at drafting ADR alternatives, but it tends to over-engineer safety mechanisms (e.g., suggesting sandboxed execution or filesystem snapshots that would break the agentless zero-footprint deployment), so every option had to be re-checked against the SSH-only architecture
 - Verification: each diagram cross-checked against the SRS use case specifications; mermaid syntax validated in the preview pane before committing
-- Enhancement: rewrote the class model to respect the four-subsystem boundaries; constrained ADR-03 to control-plane-only mechanisms consistent with the zero-footprint requirement; added the `Partially_Failed` rollback path to the state machines that the AI draft omitted
+- Enhancement: rewrote the class model to respect the four-subsystem boundaries; constrained ADR-03 to control-plane-only mechanisms consistent with the zero-footprint requirement; added the `PARTIALLY_FAILED` rollback path to the state machines that the AI draft omitted
 - Artifacts: mermaid diagram sources embedded in `design.md`
 
 ---
@@ -1330,10 +1356,10 @@ These are planned checks, not completed user-study or production-test results.
 
 1. **B. Beyer, C. Jones, J. Petoff, and N. R. Murphy, Eds., _Site Reliability Engineering: How Google Runs Production Systems_. Sebastopol, CA, USA: O'Reilly Media, 2016.**
    This foundational work formalizes Site Reliability Engineering (SRE) principles including declarative state management, toil elimination through idempotent automation, alert deduplication, and safe change management. Chapters on Eliminating Toil, Practical Alerting, and Data Processing Pipelines demonstrate how uncoordinated automation and concurrent alert storms often worsen production incidents rather than resolving them.
-   These principles directly shaped our State Reconciliation Engine and Per-Node Lease Lock Coordinator (`Section 2.1`, `ADR-01`). Rather than treating periodic SSH checks as stateless cron jobs that blindly invoke an LLM on every failure tick, we separated deterministic drift detection (`UC-03`, \$0 token cost) from bounded agentic diagnosis (`UC-04`). Specifically, the book's analysis of concurrent automation hazards motivated our per-node lock state machine (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`), which coalesces duplicate drift alerts, serializes distinct faults on the same host, and suppresses routine health probes during active `REMEDIATING` windows. Finally, its emphasis on post-change verification informed our mandatory post-remediation `UC-03` convergence check before marking any incident `Resolved`.
+   These principles directly shaped our State Reconciliation Engine and Per-Node Lease Lock Coordinator (`Section 2.1`, `ADR-01`). Rather than treating periodic SSH checks as stateless cron jobs that blindly invoke an LLM on every failure tick, we separated deterministic drift detection (`UC-03`, \$0 token cost) from bounded agentic diagnosis (`UC-04`). Specifically, the book's analysis of concurrent automation hazards motivated our per-node lock state machine (`IDLE`, `PROBING`, `DIAGNOSING`, `PENDING_APPROVAL`, `REMEDIATING`), which coalesces duplicate drift alerts, serializes distinct faults on the same host, and suppresses routine health probes during active `REMEDIATING` windows. Finally, its emphasis on post-change verification informed our mandatory post-remediation `UC-03` convergence check before marking any incident `RESOLVED`.
 
 2. **P. Helland, "Life beyond Distributed Transactions: An Apostate's Opinion," in _Proceedings of the Conference on Innovative Data Systems Research (CIDR)_, 2007.**
-   This position paper argues that large-scale systems cannot rely on distributed atomic transactions, because holding locks across heterogeneous, long-running, and sometimes-unreliable participants is impractical; instead, Helland advocates designing business operations as sequences of *local* actions paired with explicit compensation, accepting that failures leave partial effects that must be undone deliberately. Although written for enterprise data services, its reasoning transfers directly to remote shell execution: an SSH session has no transaction manager, a `systemctl restart` or config rewrite is a local, one-way side effect, and no two-phase commit can span the control plane and a target node's filesystem. This shaped `ADR-03` (transactional remediation) in three concrete ways. First, we gave up on atomic plan execution: `RemediationAction` steps run sequentially under fail-fast semantics, and an interrupted plan terminates in the explicit `Partially_Failed` state rather than pretending to be clean. Second, we made compensation first-class by requiring every mutating action to carry a `backup_cmd` (verified before mutation) and a paired `rollback_cmd`, so recovery is an ordinary, reviewable workflow — the Web UI's one-click reverse rollback ($k-1 \dots 1$) — instead of an emergency script. Third, we treat "undone" as unproven: after any rollback, the standard `UC-03` declarative probe re-runs, and the incident only closes when actual state convergence is observed, mirroring Helland's insistence that compensating logic itself needs verification. The paper also cautions that compensation code is rarely exercised in production, which prompted us to schedule rollback fault-injection tests in the Part III PoC plan (`Section 6`).
+   This position paper argues that large-scale systems cannot rely on distributed atomic transactions, because holding locks across heterogeneous, long-running, and sometimes-unreliable participants is impractical; instead, Helland advocates designing business operations as sequences of *local* actions paired with explicit compensation, accepting that failures leave partial effects that must be undone deliberately. Although written for enterprise data services, its reasoning transfers directly to remote shell execution: an SSH session has no transaction manager, a `systemctl restart` or config rewrite is a local, one-way side effect, and no two-phase commit can span the control plane and a target node's filesystem. This shaped `ADR-03` (transactional remediation) in three concrete ways. First, we gave up on atomic plan execution: `RemediationAction` steps run sequentially under fail-fast semantics, and an interrupted plan terminates in the explicit `PARTIALLY_FAILED` state rather than pretending to be clean. Second, we made compensation first-class by requiring every mutating action to carry a `backup_cmd` (verified before mutation) and a paired `rollback_cmd`, so recovery is an ordinary, reviewable workflow — the Web UI's reviewed reverse rollback of affected steps — instead of an emergency script. Third, we treat "undone" as unproven: after any rollback, the standard `UC-03` declarative probe re-runs, and the incident only closes when actual state convergence is observed, mirroring Helland's insistence that compensating logic itself needs verification. The paper also cautions that compensation code is rarely exercised in production, which prompted us to schedule rollback fault-injection tests in the Part III PoC plan (`Section 6`).
 
 3. **WHATWG, _HTML Living Standard_, “Server-sent events.”** <https://html.spec.whatwg.org/multipage/server-sent-events.html>
    This specification defines the browser EventSource interface and the text/event-stream format, including named events, event identifiers, retry intervals, and reconnection behavior. It provides the protocol foundation for the live diagnostic and remediation feedback proposed in ADR-04. The distinction between a persistent observation channel and discrete operator commands is particularly relevant to this project: the browser receives progress continuously, while approval remains an explicit authenticated HTTP request with its own validation and audit trail.
@@ -1352,7 +1378,7 @@ These are planned checks, not completed user-study or production-test results.
 5. **W3C, _Web Content Accessibility Guidelines (WCAG) 2.2_, Recommendation.** <https://www.w3.org/TR/WCAG22/>
    WCAG 2.2 defines technology-independent accessibility success criteria organized around perceivable, operable, understandable, and robust interfaces. Its guidance is relevant to an operations console because critical information must remain understandable when users navigate by keyboard, use assistive technology, or work on a small screen. A visually attractive dashboard is insufficient if an operator cannot distinguish a stale observation from a verified result or cannot reach the approval controls reliably.
 
-   The guidance influenced Section 5.1.5 in several concrete ways. Health and execution badges include explicit text instead of relying on color alone. Validation feedback identifies the relevant YAML field or line and preserves the user's draft. Keyboard focus should remain visible, enter confirmation dialogs predictably, and return to the initiating control when a dialog closes. Progress updates should be summarized in a polite live region so that frequent SSE messages do not overwhelm a screen reader. Long shell commands need wrapping or local scrolling without hiding the surrounding confirmation context.
+   The guidance influenced Section 5.1.6 in several concrete ways. Health and execution badges include explicit text instead of relying on color alone. Validation feedback identifies the relevant YAML field or line and preserves the user's draft. Keyboard focus should remain visible, enter confirmation dialogs predictably, and return to the initiating control when a dialog closes. Progress updates should be summarized in a polite live region so that frequent SSE messages do not overwhelm a screen reader. Long shell commands need wrapping or local scrolling without hiding the surrounding confirmation context.
 
    These principles also shaped the planned evaluation in Section 5.2.4. The implementation should be checked for contrast, keyboard reachability, logical focus order, error recovery, and narrow-screen behavior. The static prototypes illustrate content hierarchy and status labeling, but they cannot demonstrate complete accessibility of future Vue components, dialogs, or live announcements. Therefore, this document treats WCAG AA as a design target rather than a certified result. Part III testing should combine automated checks with keyboard walkthroughs and assistive-technology inspection of the consequential approval and recovery flows.
 
