@@ -1,7 +1,483 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moonlight Console · HW2 Prototype</title><style>
-.mxy-screen{font:14px/1.55 system-ui,'Microsoft YaHei',sans-serif;color:#1e293b;background:#f1f5f9;padding:24px;max-width:1160px;margin:16px auto;box-sizing:border-box}.mxy-screen *{box-sizing:border-box}.mxy-screen header{display:flex;justify-content:space-between;align-items:center;gap:16px}.mxy-screen h1{font-size:26px;margin:6px 0}.mxy-screen h2{font-size:17px;margin:0 0 12px}.mxy-screen h3{font-size:14px;margin:10px 0}.mxy-screen p{margin:8px 0}.mxy-screen .eyebrow{letter-spacing:2px;font-size:11px;color:#475569;font-weight:700}.mxy-screen nav{display:flex;flex-wrap:wrap;gap:8px;padding:16px 0}.mxy-screen a{color:#1d4ed8}.mxy-screen nav a{padding:7px 12px;border-radius:6px;background:white;text-decoration:none;border:1px solid #cbd5e1}.mxy-screen nav a[aria-current]{background:#0f172a;color:white}.mxy-screen .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mxy-screen .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.mxy-screen .panel{background:white;border:1px solid #cbd5e1;border-radius:10px;padding:18px;margin-bottom:16px;min-width:0}.mxy-screen .metric{font-size:28px;font-weight:700}.mxy-screen .muted{color:#475569;font-size:12px}.mxy-screen .badge{display:inline-block;padding:3px 8px;background:#e2e8f0;color:#334155;border-radius:4px;font-size:12px;font-weight:600}.mxy-screen .ok{background:#dcfce7;color:#166534}.mxy-screen .warn{background:#fef3c7;color:#854d0e}.mxy-screen .bad{background:#fee2e2;color:#991b1b}.mxy-screen .info{background:#dbeafe;color:#1e40af}.mxy-screen .banner{border-left:4px solid #2563eb;background:#eff6ff;padding:12px;margin-bottom:16px}.mxy-screen .warning{border-left-color:#b45309;background:#fffbeb}.mxy-screen table{border-collapse:collapse;width:100%;font-size:12px}.mxy-screen th{text-align:left;background:#f8fafc;color:#475569}.mxy-screen td,.mxy-screen th{padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;overflow-wrap:anywhere}.mxy-screen pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0f172a;color:#e2e8f0;border-radius:7px;padding:14px;font:12px/1.7 Consolas,monospace}.mxy-screen code{font-family:Consolas,monospace;overflow-wrap:anywhere}.mxy-screen .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.mxy-screen .action{display:inline-block;background:#1d4ed8;color:white;padding:8px 12px;border-radius:6px;font-weight:600;font-size:12px}.mxy-screen .secondary{background:#e2e8f0;color:#334155}.mxy-screen .disabled{background:#e2e8f0;color:#64748b}.mxy-screen .field{border:1px solid #94a3b8;border-radius:5px;padding:9px;margin:5px 0 12px;background:#f8fafc;overflow-wrap:anywhere}.mxy-screen ol{padding-left:22px}.mxy-screen footer{font-size:11px;color:#475569;border-top:1px solid #cbd5e1;padding-top:12px}.mxy-screen a:focus-visible{outline:3px solid #2563eb;outline-offset:3px}@media(max-width:800px){.mxy-screen{padding:12px}.mxy-screen .grid{grid-template-columns:1fr}.mxy-screen .cards{grid-template-columns:1fr 1fr}.mxy-screen header{display:block}}@media print{.mxy-screen{font-size:10px;padding:8px;margin:0;max-width:none}.mxy-screen h1{font-size:20px}.mxy-screen .panel{padding:10px;break-inside:avoid}.mxy-screen table{font-size:9px}.mxy-screen pre{font-size:9px}.mxy-screen nav{padding:8px 0}}
-</style></head><body><article class="mxy-screen"><header><div><div class="eyebrow">MOONLIGHT / OPERATIONS</div><h1>节点总览</h1><p class="muted">先了解状态，再决定下一步操作。</p></div><span class="badge ok">已连接 · 最后同步 15:20:00</span></header>
-<nav aria-label="主导航"><a aria-current="page" href="screen1_overview.html">节点总览</a><a href="screen2_policy.html">状态策略</a><a href="screen3_approval.html">故障与审批</a><a href="screen4_memory.html">长期记忆</a><a href="screen5_settings.html">设置</a></nav>
-<div class="cards"><section class="panel"><div class="muted">受管节点</div><div class="metric">3</div></section><section class="panel"><div class="muted">健康节点</div><div class="metric">1</div></section><section class="panel"><div class="muted">待审批事件</div><div class="metric">1</div></section><section class="panel"><div class="muted">连接异常</div><div class="metric">1</div></section></div>
-<section class="panel"><h2>主机与当前任务</h2><table><thead><tr><th>节点 / 最近探测</th><th>连接与健康</th><th>执行锁 / 事件</th><th>下一步</th></tr></thead><tbody><tr><td>edge-01<br><span class="muted">15:19:50 · 10 秒前</span></td><td><span class="badge ok">SSH 已连接</span><br><span class="badge warn">状态漂移</span></td><td>PENDING_APPROVAL<br>inc-104 · 合并重复信号 ×3<br><span class="muted">另有 1 个事件排队</span></td><td><a href="screen3_approval.html">查看审批 →</a></td></tr><tr><td>db-02<br><span class="muted">15:19:48</span></td><td><span class="badge ok">健康</span></td><td>IDLE · 无活动事件</td><td><a href="screen2_policy.html">检查策略 →</a></td></tr><tr><td>lab-03<br><span class="muted">最后成功：14:52:00</span></td><td><span class="badge bad">SSH 超时</span></td><td>健康未知 · 退避重试中</td><td>检查网络与 SSH 配置</td></tr></tbody></table></section>
-<div class="grid"><section class="panel"><h2>添加节点 · 注册抽屉示意</h2><div class="muted">节点名称</div><div class="field">new-node</div><div class="muted">主机 / SSH 端口 / 用户</div><div class="field">192.0.2.10 / 22 / sysops</div><div class="muted">SSH 私钥（仅写入，不回显）</div><div class="field">••••••••••••</div><div class="muted">主机指纹（需通过可信渠道核实）</div><div class="field">SHA256:&lt;verified fingerprint&gt;</div><div class="actions"><span class="action">保存并测试连接</span></div></section><section class="panel"><h2>任务与提示</h2><div class="banner warning">edge-01 正等待人工审批。排队事件将在锁释放后重新探测，避免重复诊断。</div><ol><li>录入节点并核实主机指纹。</li><li>测试连接，区分凭据错误、指纹不符与超时。</li><li>选择策略模板并验证 YAML。</li><li>激活后等待新的探测结果。</li></ol><p class="muted">空列表：展示「添加第一个节点」。断线：展示最后同步时间并停用变更操作。</p></section></div><footer>HW2 / Ma Xiaoyun · 静态原型，数据均为示例；操作标签不执行命令。导航链接可切换页面。</footer></article></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>节点总览 · Moonlight Console</title>
+<style>
+body {
+  margin: 0;
+  padding: 24px;
+  background: #e2e8f0;
+}
+.app-shell, .app-shell * { box-sizing: border-box; }
+.app-shell {
+  display: flex;
+  max-width: 1080px;
+  margin: 0 auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f5f9;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-shell code { font-family: Consolas, monospace; }
+.app-shell .sidebar {
+  width: 155px;
+  background: #0f172a;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.app-shell .brand {
+  height: 44px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+}
+.app-shell .nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.app-shell .nav-item {
+  padding: 6px 9px;
+  border-radius: 5px;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-decoration: none;
+}
+.app-shell .nav-item:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.app-shell .nav-item.active {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.app-shell .nav-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+.app-shell .nav-badge.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+.app-shell .main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-shell .topbar {
+  min-height: 44px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.app-shell .page-title {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.app-shell .content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.app-shell .stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.app-shell .stat-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.app-shell .stat-label {
+  color: #64748b;
+  font-size: 11px;
+}
+.app-shell .stat-val {
+  font-size: 17px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.app-shell .toolbar {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.app-shell .filter-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.app-shell .input, .app-shell .select, .app-shell .textarea {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 11.5px;
+  color: #0f172a;
+  font-family: inherit;
+}
+.app-shell .tab-group {
+  display: inline-flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.app-shell .tab {
+  padding: 3px 8px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 11px;
+  border-right: 1px solid #cbd5e1;
+}
+.app-shell .tab:last-child { border-right: none; }
+.app-shell .tab.active {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+}
+.app-shell .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-shell .btn:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+.app-shell .btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.app-shell .btn-success {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
+}
+.app-shell .btn-danger-ghost {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.app-shell .btn-sm {
+  height: 23px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+.app-shell .table-wrap {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+}
+.app-shell table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+.app-shell th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11.5px;
+}
+.app-shell td {
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  font-size: 11.5px;
+}
+.app-shell tr.row-alert { background: #fffbeb; }
+.app-shell .status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.app-shell .dot-green { background: #16a34a; }
+.app-shell .dot-red { background: #dc2626; }
+.app-shell .dot-amber { background: #d97706; }
+.app-shell .tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+.app-shell .tag-red { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.app-shell .tag-green { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.app-shell .tag-amber { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.app-shell .tag-purple { background: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
+.app-shell .tag-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.app-shell .table-footer {
+  padding: 7px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #64748b;
+  font-size: 11px;
+  background: #fafafa;
+}
+.app-shell .panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.app-shell .panel-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 12px;
+}
+.app-shell .panel-body { padding: 10px 12px; }
+.app-shell .field-label {
+  display: block;
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+.app-shell .textarea {
+  width: 100%;
+  height: 50px;
+  padding: 6px 8px;
+  line-height: 1.4;
+}
+.app-shell .code-preview {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 9px 11px;
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.app-shell .alert-bar {
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  border-left: 3px solid #2563eb;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.app-shell .alert-bar.warn {
+  border-left-color: #d97706;
+  background: #fffbeb;
+  color: #92400e;
+}
+.app-shell .alert-bar.bad {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+  color: #991b1b;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<a class="nav-item active" href="screen1_overview.html"><span>节点总览</span><span class="nav-badge">3</span></a>
+<a class="nav-item" href="screen2_policy.html"><span>状态策略</span><span class="nav-badge">3</span></a>
+<a class="nav-item" href="screen3_approval.html"><span>故障与审批</span><span class="nav-badge danger">1</span></a>
+<a class="nav-item" href="screen4_memory.html"><span>长期记忆</span><span class="nav-badge">42</span></a>
+<a class="nav-item" href="screen5_settings.html"><span>系统设置</span></a>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;align-items:center;gap:8px;">
+<div class="page-title">节点总览</div>
+<span class="tag tag-green"><span class="status-dot dot-green"></span>已连接 · 15:20:00</span>
+</div>
+<div style="display:flex;gap:6px;">
+<button class="btn">立即全量探测</button>
+<button class="btn btn-primary">+ 添加节点</button>
+</div>
+</header>
+<section class="content">
+<div class="stats-row">
+<div class="stat-card">
+<div class="stat-label">受管节点</div>
+<div class="stat-val">3</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">健康节点</div>
+<div class="stat-val" style="color:#16a34a;">1</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">待审批事件</div>
+<div class="stat-val" style="color:#d97706;">1</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">连接异常</div>
+<div class="stat-val" style="color:#dc2626;">1</div>
+</div>
+</div>
+<div>
+<div class="toolbar">
+<div class="filter-group">
+<div class="tab-group">
+<span class="tab active">全部 (3)</span>
+<span class="tab">告警与异常 (2)</span>
+<span class="tab">健康 (1)</span>
+</div>
+<input class="input" style="width:160px;" type="text" placeholder="搜索节点名或 IP..." />
+<select class="select">
+<option>执行锁：全部</option>
+</select>
+</div>
+<span style="color:#64748b;font-size:11px;">最近探测：15:19:50</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>节点 / 最近探测</th>
+<th>SSH 地址</th>
+<th>连接与健康</th>
+<th>执行锁 / 事件队列</th>
+<th>活动策略</th>
+<th style="text-align:right;">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-alert">
+<td><strong>edge-01</strong><br/><span style="color:#64748b;font-size:10.5px;">15:19:50 · 10s 前</span></td>
+<td><code>sysops@192.0.2.10:22</code></td>
+<td><span class="tag tag-green">SSH 已连接</span> <span class="tag tag-amber">状态漂移</span></td>
+<td><span class="tag tag-amber">PENDING_APPROVAL</span><br/><code>inc-104</code> · 合并重复信号 ×3 <span style="color:#64748b;">(+1 排队)</span></td>
+<td><span class="tag">v6 Active</span></td>
+<td style="text-align:right;">
+<a class="btn btn-sm btn-danger-ghost" href="screen3_approval.html">查看审批</a>
+<a class="btn btn-sm" href="screen2_policy.html">策略</a>
+</td>
+</tr>
+<tr>
+<td><strong>db-02</strong><br/><span style="color:#64748b;font-size:10.5px;">15:19:48 · 12s 前</span></td>
+<td><code>sysops@192.0.2.21:22</code></td>
+<td><span class="tag tag-green"><span class="status-dot dot-green"></span>健康</span></td>
+<td><span class="tag">IDLE</span> · 无活动事件</td>
+<td><span class="tag">v4 Active</span></td>
+<td style="text-align:right;">
+<button class="btn btn-sm">探测</button>
+<a class="btn btn-sm" href="screen2_policy.html">检查策略</a>
+</td>
+</tr>
+<tr class="row-alert">
+<td><strong>lab-03</strong><br/><span style="color:#64748b;font-size:10.5px;">最后成功：14:52:00</span></td>
+<td><code>sysops@192.0.2.35:22</code></td>
+<td><span class="tag tag-red"><span class="status-dot dot-red"></span>SSH 超时</span> <span class="tag">健康未知</span></td>
+<td><span class="tag">RETRY_BACKOFF</span> · 退避重试中</td>
+<td><span class="tag">v2 Active</span></td>
+<td style="text-align:right;">
+<button class="btn btn-sm">重试连接</button>
+<button class="btn btn-sm">配置</button>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="table-footer">
+<span>共 3 台受管节点 · 并发互斥锁活跃: 1</span>
+<div><button class="btn btn-sm" disabled>上一页</button> <button class="btn btn-sm" disabled>下一页</button></div>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-header">
+<span>添加节点</span>
+<span class="tag">SSH 密钥认证</span>
+</div>
+<div class="panel-body">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+<div>
+<label class="field-label">节点名称</label>
+<input class="input" style="width:100%;" type="text" value="new-node" />
+</div>
+<div>
+<label class="field-label">主机 / SSH 端口 / 用户</label>
+<input class="input" style="width:100%;" type="text" value="192.0.2.10 / 22 / sysops" />
+</div>
+<div>
+<label class="field-label">SSH 私钥</label>
+<input class="input" style="width:100%;" type="password" value="••••••••••••" />
+</div>
+<div>
+<label class="field-label">主机指纹</label>
+<input class="input" style="width:100%;font-family:Consolas,monospace;" type="text" value="SHA256:&lt;verified fingerprint&gt;" />
+</div>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+<span style="color:#64748b;font-size:11px;">最近测试：<span class="tag tag-green">指纹匹配 · 认证通过</span></span>
+<div style="display:flex;gap:6px;">
+<button class="btn">测试连接</button>
+<button class="btn btn-primary">保存并测试连接</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+</body>
+</html>

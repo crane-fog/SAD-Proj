@@ -1,6 +1,362 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moonlight Console · HW2 Prototype</title><style>
-.mxy-screen{font:14px/1.55 system-ui,'Microsoft YaHei',sans-serif;color:#1e293b;background:#f1f5f9;padding:24px;max-width:1160px;margin:16px auto;box-sizing:border-box}.mxy-screen *{box-sizing:border-box}.mxy-screen header{display:flex;justify-content:space-between;align-items:center;gap:16px}.mxy-screen h1{font-size:26px;margin:6px 0}.mxy-screen h2{font-size:17px;margin:0 0 12px}.mxy-screen h3{font-size:14px;margin:10px 0}.mxy-screen p{margin:8px 0}.mxy-screen .eyebrow{letter-spacing:2px;font-size:11px;color:#475569;font-weight:700}.mxy-screen nav{display:flex;flex-wrap:wrap;gap:8px;padding:16px 0}.mxy-screen a{color:#1d4ed8}.mxy-screen nav a{padding:7px 12px;border-radius:6px;background:white;text-decoration:none;border:1px solid #cbd5e1}.mxy-screen nav a[aria-current]{background:#0f172a;color:white}.mxy-screen .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mxy-screen .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.mxy-screen .panel{background:white;border:1px solid #cbd5e1;border-radius:10px;padding:18px;margin-bottom:16px;min-width:0}.mxy-screen .metric{font-size:28px;font-weight:700}.mxy-screen .muted{color:#475569;font-size:12px}.mxy-screen .badge{display:inline-block;padding:3px 8px;background:#e2e8f0;color:#334155;border-radius:4px;font-size:12px;font-weight:600}.mxy-screen .ok{background:#dcfce7;color:#166534}.mxy-screen .warn{background:#fef3c7;color:#854d0e}.mxy-screen .bad{background:#fee2e2;color:#991b1b}.mxy-screen .info{background:#dbeafe;color:#1e40af}.mxy-screen .banner{border-left:4px solid #2563eb;background:#eff6ff;padding:12px;margin-bottom:16px}.mxy-screen .warning{border-left-color:#b45309;background:#fffbeb}.mxy-screen table{border-collapse:collapse;width:100%;font-size:12px}.mxy-screen th{text-align:left;background:#f8fafc;color:#475569}.mxy-screen td,.mxy-screen th{padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;overflow-wrap:anywhere}.mxy-screen pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0f172a;color:#e2e8f0;border-radius:7px;padding:14px;font:12px/1.7 Consolas,monospace}.mxy-screen code{font-family:Consolas,monospace;overflow-wrap:anywhere}.mxy-screen .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.mxy-screen .action{display:inline-block;background:#1d4ed8;color:white;padding:8px 12px;border-radius:6px;font-weight:600;font-size:12px}.mxy-screen .secondary{background:#e2e8f0;color:#334155}.mxy-screen .disabled{background:#e2e8f0;color:#64748b}.mxy-screen .field{border:1px solid #94a3b8;border-radius:5px;padding:9px;margin:5px 0 12px;background:#f8fafc;overflow-wrap:anywhere}.mxy-screen ol{padding-left:22px}.mxy-screen footer{font-size:11px;color:#475569;border-top:1px solid #cbd5e1;padding-top:12px}.mxy-screen a:focus-visible{outline:3px solid #2563eb;outline-offset:3px}@media(max-width:800px){.mxy-screen{padding:12px}.mxy-screen .grid{grid-template-columns:1fr}.mxy-screen .cards{grid-template-columns:1fr 1fr}.mxy-screen header{display:block}}@media print{.mxy-screen{font-size:10px;padding:8px;margin:0;max-width:none}.mxy-screen h1{font-size:20px}.mxy-screen .panel{padding:10px;break-inside:avoid}.mxy-screen table{font-size:9px}.mxy-screen pre{font-size:9px}.mxy-screen nav{padding:8px 0}}
-</style></head><body><article class="mxy-screen"><header><div><div class="eyebrow">MOONLIGHT / INCIDENT INC-104</div><h1>诊断、审批与恢复</h1><p class="muted">edge-01 · caddy.service · 以下为同一事件的两个时间快照</p></div><span class="badge info">静态设计演示</span></header>
-<nav aria-label="主导航"><a href="screen1_overview.html">节点总览</a><a href="screen2_policy.html">状态策略</a><a aria-current="page" href="screen3_approval.html">故障与审批</a><a href="screen4_memory.html">长期记忆</a><a href="screen5_settings.html">设置</a></nav>
-<section class="panel"><h2>快照 A / 15:20 · 待人工审批</h2><div class="banner"><strong>已连接 · 方案修订 3 · 审查通过</strong><br>根因摘要：Caddy 配置包含无效指令，服务启动失败。命中历史记录 mem-019。</div><table><thead><tr><th>只读检查</th><th>已脱敏证据</th></tr></thead><tbody><tr><td><code>systemctl status caddy</code></td><td>Service failed; exit status 1</td></tr><tr><td><code>caddy validate --config /etc/caddy/Caddyfile</code></td><td>Unrecognized directive at line 12</td></tr></tbody></table><h3>完整有序方案 · MUTATING · 预期短暂服务中断</h3><table><thead><tr><th>步骤</th><th>待执行命令</th><th>备份 / 补偿</th></tr></thead><tbody><tr><td>1 · 恢复已验证配置</td><td><code>cp /etc/caddy/Caddyfile.known-good /etc/caddy/Caddyfile</code></td><td>备份：<code>cp /etc/caddy/Caddyfile /var/tmp/sysops-backup/inc-104/Caddyfile</code><br>补偿：<code>cp /var/tmp/sysops-backup/inc-104/Caddyfile /etc/caddy/Caddyfile</code></td></tr><tr><td>2 · 重启服务</td><td><code>systemctl restart caddy</code></td><td>备份：记录执行前服务状态（inactive）<br>补偿：<code>systemctl stop caddy</code>，仅在已核实状态时执行</td></tr><tr><td>3 · 验证服务</td><td><code>systemctl is-active caddy</code></td><td>只读复测，不需要补偿</td></tr></tbody></table><p class="muted">命令仅为设计示例；执行器需预先建立备份目录、校验备份、审查全部命令并核实执行权限。</p><div class="actions"><span class="action secondary">编辑并重新审查</span><span class="action secondary">填写反馈并驳回</span><span class="action">确认 edge-01 / 修订 3 并执行</span></div><p class="muted">编辑后旧审批失效。不能跳选依赖步骤。DESTRUCTIVE 命令不可批准。</p></section>
-<section class="panel"><h2>快照 B / 15:23 · 部分失败</h2><div class="banner warning"><strong>PARTIALLY_FAILED · 后续步骤已停止</strong><br>步骤 1 已修改主机，步骤 2 失败。SSH 返回失败不代表没有副作用；恢复前需核实现场状态。</div><table><thead><tr><th>步骤</th><th>备份</th><th>执行</th><th>补偿</th></tr></thead><tbody><tr><td>1 · 配置替换</td><td><span class="badge ok">Succeeded</span></td><td><span class="badge ok">Succeeded</span></td><td>待确认</td></tr><tr><td>2 · 服务重启</td><td><span class="badge ok">Succeeded</span></td><td><span class="badge bad">Failed · exit 1</span></td><td>先评估部分副作用</td></tr><tr><td>3 · 服务验证</td><td>不适用</td><td><span class="badge">Skipped</span></td><td>不适用</td></tr></tbody></table><h3>恢复确认摘要</h3><p>执行器确认范围后，逆序补偿可能受影响的步骤。恢复原配置不等于故障已经修复；仍需重新规划或人工处理后复测。</p><div class="actions"><span class="action">审阅范围并确认回滚</span><span class="action secondary">报告人工修复并验证</span></div><p class="muted">若连接中断：显示最后同步时间，停用审批与回滚提交，重新同步。若补偿失败：显示失败步骤并升级人工处理。</p></section><footer>HW2 / Ma Xiaoyun · 静态原型，数据均为示例；操作标签不执行命令。导航链接可切换页面。</footer></article></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>故障与审批 · Moonlight Console</title>
+<style>
+body {
+  margin: 0;
+  padding: 24px;
+  background: #e2e8f0;
+}
+.app-shell, .app-shell * { box-sizing: border-box; }
+.app-shell {
+  display: flex;
+  max-width: 1080px;
+  margin: 0 auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f5f9;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-shell code { font-family: Consolas, monospace; }
+.app-shell .sidebar {
+  width: 155px;
+  background: #0f172a;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.app-shell .brand {
+  height: 44px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+}
+.app-shell .nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.app-shell .nav-item {
+  padding: 6px 9px;
+  border-radius: 5px;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-decoration: none;
+}
+.app-shell .nav-item:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.app-shell .nav-item.active {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.app-shell .nav-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+.app-shell .nav-badge.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+.app-shell .main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-shell .topbar {
+  min-height: 44px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.app-shell .content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.app-shell .input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 11.5px;
+  color: #0f172a;
+  font-family: inherit;
+}
+.app-shell .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-shell .btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.app-shell .btn-success {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
+}
+.app-shell .btn-danger-ghost {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.app-shell table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+.app-shell th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11.5px;
+}
+.app-shell td {
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  font-size: 11.5px;
+}
+.app-shell tr.row-alert { background: #fffbeb; }
+.app-shell .status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.app-shell .dot-green { background: #16a34a; }
+.app-shell .tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+.app-shell .tag-red { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.app-shell .tag-green { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.app-shell .tag-amber { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.app-shell .tag-purple { background: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
+.app-shell .panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.app-shell .panel-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 12px;
+}
+.app-shell .panel-body { padding: 10px 12px; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<a class="nav-item" href="screen1_overview.html"><span>节点总览</span><span class="nav-badge">3</span></a>
+<a class="nav-item" href="screen2_policy.html"><span>状态策略</span><span class="nav-badge">3</span></a>
+<a class="nav-item active" href="screen3_approval.html"><span>故障与审批</span><span class="nav-badge danger">1</span></a>
+<a class="nav-item" href="screen4_memory.html"><span>长期记忆</span><span class="nav-badge">42</span></a>
+<a class="nav-item" href="screen5_settings.html"><span>系统设置</span></a>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;align-items:center;gap:8px;">
+<span style="color:#64748b;">故障单 /</span>
+<strong style="font-size:13.5px;">#INC-104 (edge-01 · caddy.service)</strong>
+<span class="tag tag-amber">待人工审批 · 修订 3</span>
+</div>
+<div style="display:flex;align-items:center;gap:8px;">
+<span class="tag tag-green"><span class="status-dot dot-green"></span>已连接 · 15:20:00</span>
+</div>
+</header>
+<section class="content">
+<div class="panel">
+<div class="panel-header">
+<span>1. 根因定位与只读诊断证据</span>
+<div style="display:flex;gap:6px;">
+<span class="tag tag-purple">命中记忆 #MEM-019</span>
+<span class="tag tag-green">READ_ONLY · 已脱敏</span>
+</div>
+</div>
+<div class="panel-body">
+<div style="display:grid;grid-template-columns:1fr 1.3fr;gap:10px;margin-bottom:8px;">
+<div>
+<div style="color:#64748b;font-size:11px;margin-bottom:2px;">触发漂移项</div>
+<div><code>caddy.service = failed</code>；<code>config = invalid directive</code></div>
+</div>
+<div>
+<div style="color:#64748b;font-size:11px;margin-bottom:2px;">根因摘要 (root_cause)</div>
+<div>Caddy 配置第 12 行包含无效指令，导致服务启动失败。</div>
+</div>
+</div>
+<table style="border:1px solid #e2e8f0;">
+<thead>
+<tr>
+<th style="width:285px;">只读检查命令</th>
+<th>脱敏后证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>systemctl status caddy</code></td>
+<td><code>Service failed; exit status 1</code></td>
+</tr>
+<tr>
+<td><code>caddy validate --config /etc/caddy/Caddyfile</code></td>
+<td><code>Unrecognized directive at line 12</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="panel" style="border:2px solid #f59e0b;">
+<div class="panel-header" style="background:#fffbeb;">
+<span style="color:#92400e;">2. 快照 A (15:20) · 修复方案（修订 3）</span>
+<span class="tag tag-amber">MUTATING · 预期短暂中断</span>
+</div>
+<div class="panel-body">
+<table style="border:1px solid #e2e8f0;margin-bottom:8px;">
+<thead>
+<tr>
+<th style="width:125px;">执行步骤</th>
+<th>待执行命令</th>
+<th>备份与补偿</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1 · 恢复已验证配置</strong></td>
+<td><code>cp /etc/caddy/Caddyfile.known-good /etc/caddy/Caddyfile</code></td>
+<td>备份：<code>cp /etc/caddy/Caddyfile /var/tmp/sysops-backup/inc-104/Caddyfile</code><br/>补偿：<code>cp /var/tmp/sysops-backup/inc-104/Caddyfile /etc/caddy/Caddyfile</code></td>
+</tr>
+<tr>
+<td><strong>2 · 重启服务</strong></td>
+<td><code>systemctl restart caddy</code></td>
+<td>备份：记录执行前状态（<code>inactive</code>）<br/>补偿：<code>systemctl stop caddy</code></td>
+</tr>
+<tr>
+<td><strong>3 · 验证服务</strong></td>
+<td><code>systemctl is-active caddy</code></td>
+<td>只读复测</td>
+</tr>
+</tbody>
+</table>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+<input class="input" style="flex:1;" type="text" placeholder="输入驳回原因或修改建议..." />
+<div style="display:flex;gap:6px;">
+<button class="btn">编辑并重审</button>
+<button class="btn btn-danger-ghost">驳回</button>
+<button class="btn btn-success">确认 edge-01 / 修订 3 并执行</button>
+</div>
+</div>
+</div>
+</div>
+<div class="panel" style="border-color:#fecaca;">
+<div class="panel-header" style="background:#fef2f2;">
+<span style="color:#991b1b;">3. 快照 B (15:23) · 部分失败与恢复</span>
+<span class="tag tag-red">PARTIALLY_FAILED · 已停止后续步骤</span>
+</div>
+<div class="panel-body">
+<table style="border:1px solid #e2e8f0;margin-bottom:8px;">
+<thead>
+<tr>
+<th style="width:140px;">步骤</th>
+<th style="width:105px;">备份</th>
+<th style="width:135px;">执行结果</th>
+<th>补偿状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1 · 配置替换</strong></td>
+<td><span class="tag tag-green">Succeeded</span></td>
+<td><span class="tag tag-green">Succeeded</span></td>
+<td>待确认回滚</td>
+</tr>
+<tr class="row-alert">
+<td><strong>2 · 服务重启</strong></td>
+<td><span class="tag tag-green">Succeeded</span></td>
+<td><span class="tag tag-red">Failed · exit 1</span></td>
+<td>评估部分副作用</td>
+</tr>
+<tr>
+<td><strong>3 · 服务验证</strong></td>
+<td>—</td>
+<td><span class="tag">Skipped</span></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+<span style="font-size:11px;color:#991b1b;">步骤 1 已修改主机，步骤 2 失败。请确认是否逆序回滚或人工处理。</span>
+<div style="display:flex;gap:6px;">
+<button class="btn">报告人工修复并验证</button>
+<button class="btn btn-primary">审阅范围并确认回滚</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+</body>
+</html>

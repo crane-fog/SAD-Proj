@@ -1,6 +1,318 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moonlight Console · HW2 Prototype</title><style>
-.mxy-screen{font:14px/1.55 system-ui,'Microsoft YaHei',sans-serif;color:#1e293b;background:#f1f5f9;padding:24px;max-width:1160px;margin:16px auto;box-sizing:border-box}.mxy-screen *{box-sizing:border-box}.mxy-screen header{display:flex;justify-content:space-between;align-items:center;gap:16px}.mxy-screen h1{font-size:26px;margin:6px 0}.mxy-screen h2{font-size:17px;margin:0 0 12px}.mxy-screen h3{font-size:14px;margin:10px 0}.mxy-screen p{margin:8px 0}.mxy-screen .eyebrow{letter-spacing:2px;font-size:11px;color:#475569;font-weight:700}.mxy-screen nav{display:flex;flex-wrap:wrap;gap:8px;padding:16px 0}.mxy-screen a{color:#1d4ed8}.mxy-screen nav a{padding:7px 12px;border-radius:6px;background:white;text-decoration:none;border:1px solid #cbd5e1}.mxy-screen nav a[aria-current]{background:#0f172a;color:white}.mxy-screen .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mxy-screen .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.mxy-screen .panel{background:white;border:1px solid #cbd5e1;border-radius:10px;padding:18px;margin-bottom:16px;min-width:0}.mxy-screen .metric{font-size:28px;font-weight:700}.mxy-screen .muted{color:#475569;font-size:12px}.mxy-screen .badge{display:inline-block;padding:3px 8px;background:#e2e8f0;color:#334155;border-radius:4px;font-size:12px;font-weight:600}.mxy-screen .ok{background:#dcfce7;color:#166534}.mxy-screen .warn{background:#fef3c7;color:#854d0e}.mxy-screen .bad{background:#fee2e2;color:#991b1b}.mxy-screen .info{background:#dbeafe;color:#1e40af}.mxy-screen .banner{border-left:4px solid #2563eb;background:#eff6ff;padding:12px;margin-bottom:16px}.mxy-screen .warning{border-left-color:#b45309;background:#fffbeb}.mxy-screen table{border-collapse:collapse;width:100%;font-size:12px}.mxy-screen th{text-align:left;background:#f8fafc;color:#475569}.mxy-screen td,.mxy-screen th{padding:10px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;overflow-wrap:anywhere}.mxy-screen pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0f172a;color:#e2e8f0;border-radius:7px;padding:14px;font:12px/1.7 Consolas,monospace}.mxy-screen code{font-family:Consolas,monospace;overflow-wrap:anywhere}.mxy-screen .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.mxy-screen .action{display:inline-block;background:#1d4ed8;color:white;padding:8px 12px;border-radius:6px;font-weight:600;font-size:12px}.mxy-screen .secondary{background:#e2e8f0;color:#334155}.mxy-screen .disabled{background:#e2e8f0;color:#64748b}.mxy-screen .field{border:1px solid #94a3b8;border-radius:5px;padding:9px;margin:5px 0 12px;background:#f8fafc;overflow-wrap:anywhere}.mxy-screen ol{padding-left:22px}.mxy-screen footer{font-size:11px;color:#475569;border-top:1px solid #cbd5e1;padding-top:12px}.mxy-screen a:focus-visible{outline:3px solid #2563eb;outline-offset:3px}@media(max-width:800px){.mxy-screen{padding:12px}.mxy-screen .grid{grid-template-columns:1fr}.mxy-screen .cards{grid-template-columns:1fr 1fr}.mxy-screen header{display:block}}@media print{.mxy-screen{font-size:10px;padding:8px;margin:0;max-width:none}.mxy-screen h1{font-size:20px}.mxy-screen .panel{padding:10px;break-inside:avoid}.mxy-screen table{font-size:9px}.mxy-screen pre{font-size:9px}.mxy-screen nav{padding:8px 0}}
-</style></head><body><article class="mxy-screen"><header><div><div class="eyebrow">MOONLIGHT / ADAPTIVE MEMORY</div><h1>长期记忆库</h1><p class="muted">可追溯的历史经验，为下一次诊断提供线索。</p></div><span class="badge info">默认仅检索 Active</span></header>
-<nav aria-label="主导航"><a href="screen1_overview.html">节点总览</a><a href="screen2_policy.html">状态策略</a><a href="screen3_approval.html">故障与审批</a><a aria-current="page" href="screen4_memory.html">长期记忆</a><a href="screen5_settings.html">设置</a></nav>
-<section class="panel"><h2>关键词与范围</h2><div class="grid"><div><div class="muted">搜索关键词</div><div class="field">caddy invalid directive</div></div><div><div class="muted">范围 / 生命周期</div><div class="field">service:caddy / Active</div></div></div><p class="muted">关键词匹配结果，不代表自动授权执行历史命令。</p></section>
-<div class="grid"><section class="panel"><span class="badge ok">Active · mem-019 · v2</span><h2>Caddy 配置指令不兼容</h2><p>症状：服务启动失败，配置校验提示 unknown directive。</p><p>根因：更新配置使用了当前版本不支持的指令。</p><h3>已验证处理记录</h3><ol><li>备份当前配置并确认服务状态。</li><li>恢复兼容配置，验证后重启。</li><li>复测期望状态并记录结果。</li></ol><table><tbody><tr><th>来源事件</th><td>inc-098（历史示例）</td></tr><tr><th>最近验证</th><td>2026-11-10 10:30 UTC</td></tr><tr><th>复用次数</th><td>4</td></tr><tr><th>版本来源</th><td>v2 supersedes v1</td></tr></tbody></table><div class="actions"><span class="action">编辑并创建新版本</span><span class="action secondary">归档记录</span></div></section><section class="panel"><h2>版本与人工整理</h2><p><span class="badge">v1 · Superseded</span></p><p class="muted">旧记录保留原始事件关联，不参与默认检索。</p><p><span class="badge ok">v2 · Active</span></p><p class="muted">当前修复流程来自已验证历史事件。</p><div class="banner warning"><strong>编辑不会自动获得“已验证”状态</strong><br>新内容保留来源信息，需后续真实事件验证；不能伪造验证时间或复用次数。</div><h3>归档确认示意</h3><p>归档 mem-019 后，新诊断不再默认检索该记录，历史事件与版本仍可追溯。</p><p class="muted">无结果：保留关键词，提示调整范围。搜索失败：显示错误并允许重试，不清空输入。</p></section></div><footer>HW2 / Ma Xiaoyun · 静态原型，数据均为示例；操作标签不执行命令。导航链接可切换页面。</footer></article></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>长期记忆 · Moonlight Console</title>
+<style>
+body {
+  margin: 0;
+  padding: 24px;
+  background: #e2e8f0;
+}
+.app-shell, .app-shell * { box-sizing: border-box; }
+.app-shell {
+  display: flex;
+  max-width: 1080px;
+  margin: 0 auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f5f9;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-shell code { font-family: Consolas, monospace; }
+.app-shell .sidebar {
+  width: 155px;
+  background: #0f172a;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.app-shell .brand {
+  height: 44px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+}
+.app-shell .nav-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.app-shell .nav-item {
+  padding: 6px 9px;
+  border-radius: 5px;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-decoration: none;
+}
+.app-shell .nav-item:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.app-shell .nav-item.active {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+}
+.app-shell .nav-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+.app-shell .nav-badge.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+.app-shell .main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-shell .topbar {
+  min-height: 44px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.app-shell .content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.app-shell .input, .app-shell .select, .app-shell .textarea {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 11.5px;
+  color: #0f172a;
+  font-family: inherit;
+}
+.app-shell .textarea {
+  width: 100%;
+  height: 50px;
+  padding: 6px 8px;
+  line-height: 1.4;
+}
+.app-shell .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-shell .btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.app-shell .btn-danger-ghost {
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.app-shell table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+.app-shell th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11.5px;
+}
+.app-shell td {
+  padding: 7px 9px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  font-size: 11.5px;
+}
+.app-shell .tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+.app-shell .tag-green { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.app-shell .panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.app-shell .panel-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 12px;
+}
+.app-shell .panel-body { padding: 10px 12px; }
+.app-shell .field-label {
+  display: block;
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+.app-shell .alert-bar {
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  border-left: 3px solid #2563eb;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.app-shell .alert-bar.warn {
+  border-left-color: #d97706;
+  background: #fffbeb;
+  color: #92400e;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+<div class="brand">Moonlight Console</div>
+<div class="nav-list">
+<a class="nav-item" href="screen1_overview.html"><span>节点总览</span><span class="nav-badge">3</span></a>
+<a class="nav-item" href="screen2_policy.html"><span>状态策略</span><span class="nav-badge">3</span></a>
+<a class="nav-item" href="screen3_approval.html"><span>故障与审批</span><span class="nav-badge danger">1</span></a>
+<a class="nav-item active" href="screen4_memory.html"><span>长期记忆</span><span class="nav-badge">42</span></a>
+<a class="nav-item" href="screen5_settings.html"><span>系统设置</span></a>
+</div>
+</aside>
+<main class="main-area">
+<header class="topbar">
+<div style="display:flex;gap:8px;align-items:center;">
+<strong style="font-size:13.5px;">长期记忆库</strong>
+<input class="input" style="width:170px;" type="text" value="caddy invalid directive" placeholder="输入症状关键词..." />
+<select class="select" style="width:120px;">
+<option>service:caddy</option>
+</select>
+<select class="select" style="width:110px;">
+<option>Active (默认)</option>
+</select>
+</div>
+<button class="btn btn-primary">+ 新增记忆</button>
+</header>
+<section class="content" style="display:grid;grid-template-columns:1.25fr 1fr;gap:10px;align-items:start;">
+<div class="panel">
+<div class="panel-header">
+<span>记忆详情 · #MEM-019 (v2)</span>
+<div style="display:flex;gap:6px;align-items:center;">
+<span class="tag tag-green">Active</span>
+<span style="color:#64748b;font-size:11px;">来源: inc-098</span>
+</div>
+</div>
+<div class="panel-body" style="display:flex;flex-direction:column;gap:8px;">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+<div>
+<label class="field-label">标题与症状</label>
+<input class="input" style="width:100%;" type="text" value="Caddy 配置指令不兼容 (unknown directive)" />
+</div>
+<div>
+<label class="field-label">适用范围标签</label>
+<input class="input" style="width:100%;" type="text" value="service:caddy" />
+</div>
+</div>
+<div>
+<label class="field-label">根因分析总结</label>
+<textarea class="textarea" style="height:44px;">更新配置使用了当前 Caddy 版本不支持的指令，导致服务启动校验失败。</textarea>
+</div>
+<div>
+<label class="field-label">已验证处理记录</label>
+<textarea class="textarea" style="font-family:Consolas,monospace;font-size:11px;height:60px;">1. 备份当前配置并确认服务状态
+2. 恢复兼容配置，验证后重启
+3. 复测期望状态并记录结果</textarea>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid #f1f5f9;">
+<span style="color:#64748b;font-size:11px;">最近验证：2026-11-10 10:30 UTC · 复用 4 次</span>
+<div style="display:flex;gap:6px;">
+<button class="btn btn-danger-ghost">归档记录</button>
+<button class="btn btn-primary">编辑并创建新版本</button>
+</div>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-header">
+<span>版本历史</span>
+<span style="color:#64748b;font-size:11px;">2 个版本</span>
+</div>
+<div class="panel-body" style="display:flex;flex-direction:column;gap:8px;">
+<table style="border:1px solid #e2e8f0;">
+<thead>
+<tr>
+<th style="width:46px;">版本</th>
+<th style="width:86px;">状态</th>
+<th>来源与说明</th>
+</tr>
+</thead>
+<tbody>
+<tr style="background:#eff6ff;">
+<td><strong>v2</strong></td>
+<td><span class="tag tag-green">Active</span></td>
+<td><code>supersedes v1</code> · 由 <code>inc-098</code> 验证</td>
+</tr>
+<tr>
+<td><strong>v1</strong></td>
+<td><span class="tag">Superseded</span></td>
+<td>历史版本（不参与默认检索）</td>
+</tr>
+</tbody>
+</table>
+<div class="alert-bar warn">
+编辑生成的新版本为待验证状态，需经后续真实事件复测。
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+</body>
+</html>
