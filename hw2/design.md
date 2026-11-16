@@ -36,6 +36,10 @@ puppeteer:
 
 ## 1. Design Summary
 
+**Core Problem & Design Tensions**
+
+Personal developers, homelab operators, and researchers managing 1–20 Linux hosts face an operational gap: enterprise observability platforms (e.g., Datadog) are overly heavy and require target-side agents, static tools (e.g., Ansible) cannot reason about novel runtime faults, and manual SSH debugging turns recurring incidents—such as container OOM kills, failed SSL renewals, or firewall blocks—into repetitive toil whose temporary fixes are quickly forgotten. Bridging this gap with a single-binary, agentless control plane powered by an LLM creates three core design tensions: (1) detecting drift deterministically at near-zero cost without alert storms or concurrent write races over stateless SSH; (2) allowing an untrusted, probabilistic model to inspect live hosts without executing destructive commands or leaking host credentials to external LLM APIs; and (3) achieving reliable multi-step recovery and reusable long-term memory across non-transactional Linux hosts.
+
 Since Part I SRS, we have translated our black-box requirements into an implementation-ready architecture packaged within a single Go binary, an embedded SQLite datastore, and a Vue 3 web console. We decomposed the system into four cohesive subsystems—Web & API Gateway, State Reconciliation Engine, Agent & Memory Orchestrator, and SysOps SSH & Safety—formalized across C4 Logical, Deployment, and Technology views, UML behavioral/structural models, and Architecture Decision Records.
 
 **What Changed and Why**
@@ -277,6 +281,8 @@ The orchestrator retains concise observations and tool outcomes rather than unbo
 When `UC-03` detects drift and the per-node coordinator grants a `DIAGNOSING` lease (`CHG-02`), the orchestrator first searches historical memories and builds the initial context. The Diagnostic Agent then follows a bounded Reason–Act–Observe loop: (1) infer a likely cause from available evidence; (2) issue a diagnostic tool call; (3) let the interceptor and safety subsystem vet and execute an eligible read-only probe; and (4) incorporate the redacted observation into the next inference step. The configured default ceiling is `max_turns = 8` (`SRS UC-04`). The orchestrator also applies cancellation to every LLM HTTP request (proposed 30-second per-call deadline) and a 120-second end-to-end diagnosis budget from `SRS 7.7`. On timeout, it cancels the in-flight request, stops renewing the diagnosis lease once it is safe to do so, records a sanitized timeout outcome, and escalates; a hung provider cannot indefinitely hold the node or cause an unbounded retry. If a command is not read-only, the interceptor refuses it and instructs the agent to collect evidence through safe probes or defer the change to the remediation plan.
 
 If sufficient evidence is obtained, the agent submits a structured root-cause summary and ordered remediation actions through `propose_remediation_plan`. The incident transitions to `PENDING_APPROVAL` and waits for explicit operator review (`UC-05`); the Diagnostic Agent never runs the proposed mutations itself. If the turn ceiling is reached or useful diagnosis cannot proceed, the incident is marked `ESCALATED` with the available sanitized evidence, rather than guessing or automatically repairing the host. If the LLM endpoint is unavailable, deterministic drift detection and alerting continue independently, while agent diagnosis is deferred or escalated (`SRS 7.5`).
+
+To keep diagnosis accurate within the `max_turns = 8` budget, the orchestrator seeds turn 1 with a structured Probe Diff (expected vs. observed values) paired with a trusted node runtime profile (OS distribution, init system, container runtime). Before querying FTS5, diagnostic symptoms undergo operational token normalization—stripping ephemeral timestamps, PIDs, container hashes, and dynamic IPs—so recurring faults (e.g., `nginx.service` + `Address already in use`) match reliably; across turns, verbose terminal outputs from earlier steps are folded into concise findings and exit codes to protect the context window. When diagnosis exhausts `max_turns` or hits permission boundaries, `ESCALATED` emits a structured handover report (verified observations, ruled-out hypotheses, and unresolved checks) rather than raw logs.
 
 #### 2.7.5 Safety, Human Handoff, and Post-Resolution Memory
 
@@ -851,6 +857,8 @@ sequenceDiagram
     end
 ```
 
+**Probing Mechanics, Batching, and Anti-Flapping.** `ProbeScheduler` compiles each declarative `ProbeRule` (`ServiceHealth`, `PortReach`, `CertValidity`, `ResourceThreshold`) deterministically—at \$0 LLM cost—into fixed-format read-only checks (e.g., `systemctl show --property=ActiveState,SubState`, `docker inspect --format`, `df -P`, `openssl` cert checks) and batches all active rules for a node over a pooled SSH session to meet the `< 2 s/node` target without triggering `sshd MaxStartups` limits. Transport unreachability is isolated from state drift: SSH connection failures update `connection_status` and trigger `RETRY_BACKOFF` exponential backoff rather than spurious LLM diagnosis. To prevent transient restarts or brief metric spikes from causing alert storms, rules support consecutive-failure hysteresis before opening an incident, and each confirmed drift derives a canonical `drift_signature` (`node_id + manifest_id + rule_id + normalized_failure`) so recurring ticks coalesce accurately into `coalesced_count`.
+
 #### 3.5.2 Sequence 4: HITL Approval, Pre-Mutation Backup, Step Execution & Rollback (`UC-05`)
 
 ```mermaid
@@ -906,6 +914,8 @@ sequenceDiagram
         API->>C: transition lease (DIAGNOSING / IDLE)
     end
 ```
+
+**Execution Reliability, Crash Reconciliation, and Snapshot Lifecycle.** Because closing an SSH channel or restarting the control plane does not terminate an already-running remote process, mutating steps run under a lightweight remote execution wrapper recording the operation PID and exit marker under `/var/tmp/sysops-run/<operation_id>/`. After a crash, worker timeout, or lease expiry, the node enters quarantine (`recovery_required = 1`) and a recovery check verifies via read-only inspection that any prior remote process has stopped and reconciles its actual state before advancing `lease_generation` or permitting new mutations. To avoid lock starvation while an operator reviews `PENDING_APPROVAL` for an extended period, routine read-only health awareness may still proceed, reserving the exclusive mutation/probe-suppression lock strictly for `REMEDIATING`. Finally, pre-mutation snapshots under `/var/tmp/sysops-backup/<incident_id>/` are pruned automatically by a bounded retention policy (TTL after `RESOLVED` plus per-node disk quota) so backups cannot accumulate and exhaust target host storage.
 
 ### 3.6 API Interfaces
 
