@@ -1,0 +1,23 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '24px', 'fontFamily': 'Microsoft YaHei, Calibri, sans-serif', 'primaryColor': '#EFF6FF', 'primaryBorderColor': '#3B82F6', 'lineColor': '#475569'}, 'flowchart': {'nodeSpacing': 16, 'rankSpacing': 26, 'curve': 'basis', 'padding': 10, 'wrappingWidth': 300}}}%%
+flowchart TB
+    Diag["<b>诊断智能体</b><br/>仅推理提案"]
+    Gate["<b>确定性 Go 拦截器</b><br/>AST · 白名单 · 锁校验"]
+    Rev["<b>安全审查</b><br/>仅作分级"]
+
+    SSH["<b>节点 SSH</b><br/>备份 · 执行"]
+    Human["<b>人工审批</b><br/>确认 · 修改"]
+    Red["<b>本地脱敏</b><br/>掩码凭据"]
+
+    Diag -->|"工具调用"| Gate
+    Gate <-->|"分级"| Rev
+    Gate -->|"只读"| SSH
+    Gate -->|"变更"| Human
+    Human -->|"批准"| SSH
+    SSH --> Red
+    Red -->|"脱敏日志"| Diag
+
+    style Gate fill:#FEF9C3,stroke:#CA8A04,stroke-width:2.5px
+    style Diag fill:#FAF5FF,stroke:#9333EA,stroke-width:2px
+    style Rev fill:#FFFBEB,stroke:#D97706,stroke-width:2px
+    style Human fill:#EFF6FF,stroke:#2563EB,stroke-width:2px
+    style Red fill:#F0FDF4,stroke:#16A34A,stroke-width:2px

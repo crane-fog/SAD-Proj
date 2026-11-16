@@ -1,0 +1,26 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '24px', 'fontFamily': 'Microsoft YaHei, Calibri, sans-serif', 'primaryColor': '#EFF6FF', 'primaryBorderColor': '#3B82F6', 'lineColor': '#475569'}, 'flowchart': {'nodeSpacing': 24, 'rankSpacing': 42, 'curve': 'basis', 'padding': 14, 'wrappingWidth': 320}}}%%
+flowchart LR
+    Browser(["<b>运维浏览器</b><br/>Vue 3 控制台"])
+
+    subgraph Host ["控制平面宿主机"]
+        direction TB
+        Bin["<b>Go 单文件进程</b><br/>内嵌前端 · 调度 · 智能体"]
+        DB[("<b>本地加密 SQLite</b><br/>状态 · 记忆 · 密钥")]
+        Bin --- DB
+    end
+
+    subgraph Targets [" "]
+        direction TB
+        SSH["<b>受管 Linux 节点 (1~20 台)</b><br/>零驻留代理 · 写前暂存快照"]
+        LLM["<b>大模型 API 端点</b><br/>云端或本地推理服务"]
+    end
+
+    Browser <-->|"HTTPS / SSE"| Bin
+    Bin <-->|"加密 SSH"| SSH
+    Bin <-->|"脱敏请求"| LLM
+
+    style Host fill:#EFF6FF,stroke:#2563EB,stroke-width:2px
+    style Targets fill:transparent,stroke:transparent
+    style SSH fill:#F0FDF4,stroke:#16A34A,stroke-width:2px
+    style LLM fill:#FAF5FF,stroke:#9333EA,stroke-width:2px
+    style Browser fill:#F8FAFC,stroke:#64748B,stroke-width:2px

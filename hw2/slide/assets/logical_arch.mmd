@@ -1,0 +1,30 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '24px', 'fontFamily': 'Microsoft YaHei, Calibri, sans-serif', 'primaryColor': '#EFF6FF', 'primaryBorderColor': '#3B82F6', 'lineColor': '#475569'}, 'flowchart': {'nodeSpacing': 22, 'rankSpacing': 40, 'curve': 'basis', 'padding': 14, 'wrappingWidth': 300}}}%%
+flowchart LR
+    User(["<b>运维人员</b><br/>浏览器"])
+
+    subgraph CP ["单二进制控制平面 (Go)"]
+        GW["<b>1. Web & API 网关</b><br/>交互 · 审批 · 推送"]
+        Recon["<b>2. 状态调谐引擎</b><br/>YAML · 巡检 · 节点锁"]
+        Agent["<b>3. 智能体与记忆</b><br/>有界诊断 · 经验召回"]
+        Safe["<b>4. SSH 与安全护栏</b><br/>拦截 · 审查 · 脱敏回滚"]
+        DB[("<b>嵌入式 SQLite</b><br/>状态 · 记忆 · 密钥")]
+
+        GW -->|"管理 / 审批"| Recon
+        GW -->|"对话"| Agent
+        GW -->|"回滚"| Safe
+        Recon --- DB
+    end
+
+    LLM["<b>大模型服务</b><br/>OpenAI 兼容"]
+    Linux[("<b>受管 Linux 节点</b><br/>仅需开启 SSH")]
+
+    User <-->|"HTTPS / SSE"| GW
+    Agent <-->|"脱敏推理"| LLM
+    Safe <-->|"加密 SSH"| Linux
+
+    style CP fill:#F8FAFC,stroke:#475569,stroke-width:2px
+    style GW fill:#EFF6FF,stroke:#3B82F6,stroke-width:2px
+    style Recon fill:#F0FDF4,stroke:#22C55E,stroke-width:2px
+    style Agent fill:#FAF5FF,stroke:#A855F7,stroke-width:2px
+    style Safe fill:#FFFBEB,stroke:#F59E0B,stroke-width:2px
+    style DB fill:#F1F5F9,stroke:#475569,stroke-width:1.5px

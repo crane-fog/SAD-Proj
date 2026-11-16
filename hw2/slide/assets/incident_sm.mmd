@@ -1,0 +1,13 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '24px', 'fontFamily': 'Microsoft YaHei, Calibri, sans-serif', 'primaryColor': '#EFF6FF', 'primaryBorderColor': '#3B82F6', 'lineColor': '#475569'}}}%%
+stateDiagram-v2
+    [*] --> 巡检异常 : 发现漂移
+    巡检异常 --> 诊断中 : 获节点锁
+    诊断中 --> 待人工审批 : 生成方案
+    诊断中 --> 转交人工 : 超时
+    待人工审批 --> 诊断中 : 驳回
+    待人工审批 --> 执行修复 : 批准
+    执行修复 --> 已解决 : 复测收敛
+    执行修复 --> 部分失败 : 失败中止
+    部分失败 --> 待人工审批 : 回滚重审
+    转交人工 --> 已解决 : 手工修复
+    已解决 --> [*]
